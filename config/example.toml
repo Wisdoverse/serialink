@@ -1,0 +1,75 @@
+# Serialink Configuration
+# This file configures the serial port connection, data processing pipeline,
+# and serving options for AI agent integration.
+
+# Serial port configuration
+[port]
+# Path to the serial device (required)
+path = "/dev/ttyUSB0"
+
+# Baud rate for the serial connection (default: 115200)
+baud_rate = 115200
+
+# Number of data bits: 5, 6, 7, or 8 (default: 8)
+data_bits = 8
+
+# Number of stop bits: 1 or 2 (default: 1)
+stop_bits = 1
+
+# Parity checking: "none", "odd", or "even" (default: "none")
+parity = "none"
+
+# Automatically reconnect if the serial port disconnects (default: true)
+auto_reconnect = true
+
+# Milliseconds to wait between reconnection attempts (default: 2000)
+reconnect_interval_ms = 2000
+
+# Data processing pipeline
+# Steps are applied in order to each piece of serial data.
+# Each step must specify a "type" field.
+
+# Line buffer: accumulates raw bytes into complete lines
+[[pipeline]]
+type = "line_buffer"
+# Character encoding to use: "utf-8", "ascii", etc. (default: "utf-8")
+encoding = "utf-8"
+
+# Timestamp: prepends a timestamp to each line
+[[pipeline]]
+type = "timestamp"
+# Timestamp format: "iso8601", "unix", "rfc2822" (default: "iso8601")
+format = "iso8601"
+
+# Regex filter: include or exclude lines matching a pattern
+[[pipeline]]
+type = "regex_filter"
+# Regular expression pattern to match against each line (required)
+pattern = "ERROR|WARN"
+# Filter mode: "include" keeps matching lines, "exclude" drops them (default: "include")
+mode = "include"
+
+# Log level parser: extracts structured log levels from lines
+[[pipeline]]
+type = "log_level_parser"
+# Log format to parse: "esp-idf", "syslog", "generic" (default: "generic")
+format = "esp-idf"
+
+# Aggregator: groups related lines within a time window
+[[pipeline]]
+type = "aggregator"
+# Time window in milliseconds to aggregate lines (required)
+window_ms = 500
+# Regex pattern that triggers a new aggregation group (required)
+trigger_pattern = "^\\[\\d+\\]"
+
+# Serving configuration for AI agent access
+[serve]
+# Enable MCP (Model Context Protocol) server for direct AI agent integration
+mcp = true
+
+# Enable HTTP/WebSocket server for remote access
+http = true
+
+# Port for the HTTP server (default: none, auto-assigned)
+port = 8600

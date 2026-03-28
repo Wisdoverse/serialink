@@ -1,0 +1,27 @@
+/target
+Cargo.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+
+# Worktrees
+.worktrees/
+
+# Agent runtime artifacts
+.remember/
+.codex
+.context/
+docs/plans/
+docs/superpowers/

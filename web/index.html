@@ -1,0 +1,1087 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>serialink - Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: { 50:'#eef2ff',100:'#e0e7ff',200:'#c7d2fe',300:'#a5b4fc',400:'#818cf8',500:'#6366f1',600:'#4f46e5',700:'#4338ca',800:'#3730a3',900:'#312e81' },
+            surface: { 0:'#0b0f19',1:'#111827',2:'#1a2236',3:'#1f2937',4:'#273549' },
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+    body { font-family: 'Inter', sans-serif; }
+    .mono { font-family: 'JetBrains Mono', monospace; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #111827; }
+    ::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #4b5563; }
+    .terminal-line { line-height: 1.6; }
+    .fade-in { animation: fadeIn 0.2s ease-in; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes pulse-dot { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+    .pulse-dot { animation: pulse-dot 2s ease-in-out infinite; }
+    .sidebar-link { transition: all 0.15s ease; }
+    .sidebar-link:hover { background: rgba(99,102,241,0.1); }
+    .sidebar-link.active { background: rgba(99,102,241,0.15); border-right: 2px solid #6366f1; }
+    .toast-enter { animation: slideIn 0.3s ease-out; }
+    @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+    .spinner { border: 2px solid rgba(255,255,255,0.1); border-top-color: #6366f1; border-radius: 50%; width: 16px; height: 16px; animation: spin 0.6s linear infinite; display: inline-block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    select, input, textarea { color: #e5e7eb; }
+    select option { background: #1a2236; color: #e5e7eb; }
+  /* Fallback styles for air-gapped environments (no CDN access) */
+  .fallback-active body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #e2e8f0; }
+  .fallback-active .hidden { display: none; }
+  </style>
+  <script>
+    // Detect if Tailwind loaded
+    if (!window.tailwind) {
+      document.documentElement.classList.add('fallback-active');
+      console.warn('serialink: Tailwind CDN unavailable. Using minimal fallback styles.');
+    }
+  </script>
+</head>
+<body class="bg-surface-0 text-gray-200 h-screen flex overflow-hidden">
+
+  <div id="cdn-warning" style="display:none; background:#dc2626; color:white; padding:12px; text-align:center; font-family:sans-serif;">
+    Tailwind CSS CDN is not available. The dashboard requires an internet connection for full styling, or you can use the HTTP REST API directly.
+  </div>
+  <script>
+    setTimeout(function() {
+      if (!document.querySelector('[data-generated]') && !window.tailwind) {
+        document.getElementById('cdn-warning').style.display = 'block';
+      }
+    }, 3000);
+  </script>
+
+  <!-- Toast Container -->
+  <div id="toast-container" class="fixed top-4 right-4 z-50 flex flex-col gap-2"></div>
+
+  <!-- Sidebar -->
+  <aside id="sidebar" class="w-56 bg-surface-1 border-r border-gray-800 flex flex-col shrink-0 transition-all duration-200">
+    <div class="p-4 border-b border-gray-800 flex items-center gap-2">
+      <div class="w-8 h-8 rounded-lg bg-brand-600 flex items-center justify-center">
+        <i data-lucide="cable" class="w-4 h-4 text-white"></i>
+      </div>
+      <span class="font-semibold text-white text-lg tracking-tight">serialink</span>
+    </div>
+    <nav class="flex-1 py-2">
+      <a href="#" data-view="dashboard" class="sidebar-link active flex items-center gap-3 px-4 py-2.5 text-sm text-gray-300">
+        <i data-lucide="layout-dashboard" class="w-4 h-4"></i> Dashboard
+      </a>
+      <a href="#" data-view="monitor" class="sidebar-link flex items-center gap-3 px-4 py-2.5 text-sm text-gray-400">
+        <i data-lucide="monitor" class="w-4 h-4"></i> Monitor
+      </a>
+      <a href="#" data-view="sessions" class="sidebar-link flex items-center gap-3 px-4 py-2.5 text-sm text-gray-400">
+        <i data-lucide="list" class="w-4 h-4"></i> Sessions
+      </a>
+      <a href="#" data-view="sendexpect" class="sidebar-link flex items-center gap-3 px-4 py-2.5 text-sm text-gray-400">
+        <i data-lucide="send" class="w-4 h-4"></i> Send &amp; Expect
+      </a>
+      <a href="#" data-view="settings" class="sidebar-link flex items-center gap-3 px-4 py-2.5 text-sm text-gray-400">
+        <i data-lucide="settings" class="w-4 h-4"></i> Settings
+      </a>
+    </nav>
+    <div class="p-3 border-t border-gray-800 text-xs text-gray-500">
+      <div id="sidebar-version">v0.0.0</div>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <div class="flex-1 flex flex-col min-w-0">
+    <!-- Top bar -->
+    <header class="h-12 bg-surface-1 border-b border-gray-800 flex items-center justify-between px-4 shrink-0">
+      <div class="flex items-center gap-3">
+        <button id="sidebar-toggle" class="lg:hidden p-1 hover:bg-surface-3 rounded">
+          <i data-lucide="menu" class="w-5 h-5"></i>
+        </button>
+        <h1 id="view-title" class="text-sm font-medium text-gray-300">Dashboard</h1>
+      </div>
+      <div class="flex items-center gap-4">
+        <div id="health-indicator" class="flex items-center gap-2 text-xs">
+          <span class="w-2 h-2 rounded-full bg-gray-600 pulse-dot" id="health-dot"></span>
+          <span id="health-text" class="text-gray-500">Checking...</span>
+        </div>
+        <span id="topbar-version" class="text-xs text-gray-600 hidden sm:block">v0.0.0</span>
+      </div>
+    </header>
+
+    <!-- Content -->
+    <main id="content" class="flex-1 overflow-auto p-4 sm:p-6">
+    </main>
+  </div>
+
+  <!-- View Templates (hidden, cloned into #content) -->
+  <template id="tpl-dashboard">
+    <div class="fade-in">
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6" id="stats-cards">
+        <div class="bg-surface-2 rounded-xl p-4 border border-gray-800">
+          <div class="text-xs text-gray-500 uppercase tracking-wider mb-1">Health</div>
+          <div id="dash-health" class="text-2xl font-semibold"><span class="spinner"></span></div>
+        </div>
+        <div class="bg-surface-2 rounded-xl p-4 border border-gray-800">
+          <div class="text-xs text-gray-500 uppercase tracking-wider mb-1">Available Ports</div>
+          <div id="dash-ports-count" class="text-2xl font-semibold"><span class="spinner"></span></div>
+        </div>
+        <div class="bg-surface-2 rounded-xl p-4 border border-gray-800">
+          <div class="text-xs text-gray-500 uppercase tracking-wider mb-1">Active Sessions</div>
+          <div id="dash-sessions-count" class="text-2xl font-semibold"><span class="spinner"></span></div>
+        </div>
+      </div>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div class="bg-surface-2 rounded-xl border border-gray-800 overflow-hidden">
+          <div class="px-4 py-3 border-b border-gray-800 flex items-center justify-between">
+            <h3 class="text-sm font-medium text-gray-300 flex items-center gap-2"><i data-lucide="usb" class="w-4 h-4 text-brand-400"></i> Available Ports</h3>
+            <button id="dash-refresh-ports" class="text-xs text-gray-500 hover:text-gray-300 flex items-center gap-1"><i data-lucide="refresh-cw" class="w-3 h-3"></i> Refresh</button>
+          </div>
+          <div id="dash-ports" class="p-4"><span class="spinner"></span></div>
+        </div>
+        <div class="bg-surface-2 rounded-xl border border-gray-800 overflow-hidden">
+          <div class="px-4 py-3 border-b border-gray-800 flex items-center justify-between">
+            <h3 class="text-sm font-medium text-gray-300 flex items-center gap-2"><i data-lucide="radio" class="w-4 h-4 text-brand-400"></i> Active Sessions</h3>
+            <button id="dash-refresh-sessions" class="text-xs text-gray-500 hover:text-gray-300 flex items-center gap-1"><i data-lucide="refresh-cw" class="w-3 h-3"></i> Refresh</button>
+          </div>
+          <div id="dash-sessions" class="p-4"><span class="spinner"></span></div>
+        </div>
+      </div>
+    </div>
+  </template>
+
+  <template id="tpl-monitor">
+    <div class="flex flex-col h-full gap-4 fade-in">
+      <div class="flex flex-wrap items-center gap-3">
+        <select id="mon-port" class="bg-surface-2 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-brand-500">
+          <option value="">Select port...</option>
+        </select>
+        <input id="mon-baud" type="number" value="115200" class="bg-surface-2 border border-gray-700 rounded-lg px-3 py-2 text-sm w-28 focus:outline-none focus:border-brand-500" placeholder="Baud rate">
+        <button id="mon-connect" class="bg-brand-600 hover:bg-brand-700 text-white text-sm px-4 py-2 rounded-lg flex items-center gap-2 transition-colors">
+          <i data-lucide="play" class="w-4 h-4"></i> Connect
+        </button>
+        <button id="mon-disconnect" class="bg-red-700 hover:bg-red-800 text-white text-sm px-4 py-2 rounded-lg flex items-center gap-2 transition-colors hidden">
+          <i data-lucide="square" class="w-4 h-4"></i> Disconnect
+        </button>
+        <div class="flex-1"></div>
+        <input id="mon-filter" type="text" placeholder="Filter (regex)..." class="bg-surface-2 border border-gray-700 rounded-lg px-3 py-2 text-sm w-40 focus:outline-none focus:border-brand-500">
+        <button id="mon-pause" class="bg-surface-3 hover:bg-surface-4 text-gray-300 text-sm px-3 py-2 rounded-lg flex items-center gap-1 transition-colors" title="Pause/Resume">
+          <i data-lucide="pause" class="w-4 h-4"></i>
+        </button>
+        <button id="mon-clear" class="bg-surface-3 hover:bg-surface-4 text-gray-300 text-sm px-3 py-2 rounded-lg flex items-center gap-1 transition-colors" title="Clear">
+          <i data-lucide="trash-2" class="w-4 h-4"></i>
+        </button>
+        <button id="mon-download" class="bg-surface-3 hover:bg-surface-4 text-gray-300 text-sm px-3 py-2 rounded-lg flex items-center gap-1 transition-colors" title="Download JSON">
+          <i data-lucide="download" class="w-4 h-4"></i>
+        </button>
+      </div>
+      <div id="mon-terminal" class="flex-1 bg-surface-1 border border-gray-800 rounded-xl p-4 overflow-auto mono text-xs min-h-0">
+        <div class="text-gray-600 text-center py-8">Connect to a port to start monitoring</div>
+      </div>
+      <div class="flex items-center gap-3">
+        <input id="mon-write-input" type="text" placeholder="Write data to port..." class="flex-1 bg-surface-2 border border-gray-700 rounded-lg px-3 py-2 text-sm mono focus:outline-none focus:border-brand-500">
+        <button id="mon-write-btn" class="bg-surface-3 hover:bg-surface-4 text-gray-300 text-sm px-4 py-2 rounded-lg flex items-center gap-2 transition-colors">
+          <i data-lucide="send" class="w-4 h-4"></i> Write
+        </button>
+      </div>
+    </div>
+  </template>
+
+  <template id="tpl-sessions">
+    <div class="fade-in">
+      <div class="mb-6 bg-surface-2 rounded-xl border border-gray-800 p-4">
+        <h3 class="text-sm font-medium text-gray-300 mb-3 flex items-center gap-2"><i data-lucide="plus-circle" class="w-4 h-4 text-brand-400"></i> Open New Session</h3>
+        <div class="flex flex-wrap items-end gap-3">
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">Port Path</label>
+            <input id="sess-port" type="text" placeholder="/dev/ttyUSB0" class="bg-surface-1 border border-gray-700 rounded-lg px-3 py-2 text-sm mono focus:outline-none focus:border-brand-500 w-52">
+          </div>
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">Baud Rate</label>
+            <input id="sess-baud" type="number" value="115200" class="bg-surface-1 border border-gray-700 rounded-lg px-3 py-2 text-sm w-28 focus:outline-none focus:border-brand-500">
+          </div>
+          <button id="sess-open-btn" class="bg-brand-600 hover:bg-brand-700 text-white text-sm px-4 py-2 rounded-lg flex items-center gap-2 transition-colors">
+            <i data-lucide="plus" class="w-4 h-4"></i> Open
+          </button>
+        </div>
+      </div>
+      <div class="bg-surface-2 rounded-xl border border-gray-800 overflow-hidden">
+        <div class="px-4 py-3 border-b border-gray-800 flex items-center justify-between">
+          <h3 class="text-sm font-medium text-gray-300 flex items-center gap-2"><i data-lucide="list" class="w-4 h-4 text-brand-400"></i> Sessions</h3>
+          <button id="sess-refresh" class="text-xs text-gray-500 hover:text-gray-300 flex items-center gap-1"><i data-lucide="refresh-cw" class="w-3 h-3"></i> Refresh</button>
+        </div>
+        <div id="sess-table" class="p-4"><span class="spinner"></span></div>
+      </div>
+    </div>
+  </template>
+
+  <template id="tpl-sendexpect">
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 h-full fade-in">
+      <div class="flex flex-col gap-4">
+        <div class="bg-surface-2 rounded-xl border border-gray-800 p-4">
+          <h3 class="text-sm font-medium text-gray-300 mb-3 flex items-center gap-2"><i data-lucide="send" class="w-4 h-4 text-brand-400"></i> Send &amp; Expect</h3>
+          <div class="flex flex-col gap-3">
+            <div>
+              <label class="block text-xs text-gray-500 mb-1">Session</label>
+              <select id="se-session" class="w-full bg-surface-1 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-brand-500">
+                <option value="">Loading sessions...</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs text-gray-500 mb-1">Command</label>
+              <input id="se-cmd" type="text" placeholder="AT\r\n" class="w-full bg-surface-1 border border-gray-700 rounded-lg px-3 py-2 text-sm mono focus:outline-none focus:border-brand-500">
+            </div>
+            <div>
+              <label class="block text-xs text-gray-500 mb-1">Expected Pattern (regex)</label>
+              <input id="se-pattern" type="text" placeholder="OK" class="w-full bg-surface-1 border border-gray-700 rounded-lg px-3 py-2 text-sm mono focus:outline-none focus:border-brand-500">
+            </div>
+            <div>
+              <label class="block text-xs text-gray-500 mb-1">Timeout: <span id="se-timeout-val">5</span>s</label>
+              <input id="se-timeout" type="range" min="1" max="30" value="5" class="w-full accent-brand-500">
+            </div>
+            <button id="se-exec-btn" class="bg-brand-600 hover:bg-brand-700 text-white text-sm px-4 py-2 rounded-lg flex items-center justify-center gap-2 transition-colors">
+              <i data-lucide="zap" class="w-4 h-4"></i> Execute <span class="text-xs text-brand-300">(Ctrl+Enter)</span>
+            </button>
+          </div>
+        </div>
+        <div class="bg-surface-2 rounded-xl border border-gray-800 p-4 flex-1 min-h-0 overflow-auto">
+          <h3 class="text-sm font-medium text-gray-300 mb-3 flex items-center justify-between">
+            <span class="flex items-center gap-2"><i data-lucide="history" class="w-4 h-4 text-brand-400"></i> Command History</span>
+            <button id="se-clear-history" class="text-xs text-gray-500 hover:text-gray-300">Clear</button>
+          </h3>
+          <div id="se-history" class="flex flex-col gap-1"></div>
+        </div>
+      </div>
+      <div class="bg-surface-2 rounded-xl border border-gray-800 p-4 flex flex-col">
+        <h3 class="text-sm font-medium text-gray-300 mb-3 flex items-center gap-2"><i data-lucide="terminal" class="w-4 h-4 text-brand-400"></i> Result</h3>
+        <div id="se-result" class="flex-1 bg-surface-1 rounded-lg p-4 overflow-auto mono text-xs min-h-0">
+          <div class="text-gray-600 text-center py-8">Execute a command to see results</div>
+        </div>
+      </div>
+    </div>
+  </template>
+
+  <template id="tpl-settings">
+    <div class="max-w-lg mx-auto flex flex-col gap-6 fade-in">
+      <div class="bg-surface-2 rounded-xl border border-gray-800 p-5">
+        <h3 class="text-sm font-medium text-gray-300 mb-4 flex items-center gap-2"><i data-lucide="key" class="w-4 h-4 text-brand-400"></i> API Key</h3>
+        <input id="set-apikey" type="password" placeholder="Enter API key..." class="w-full bg-surface-1 border border-gray-700 rounded-lg px-3 py-2 text-sm mono focus:outline-none focus:border-brand-500 mb-2">
+        <p class="text-xs text-gray-500">Sent as X-API-Key header with every request.</p>
+      </div>
+      <div class="bg-surface-2 rounded-xl border border-gray-800 p-5">
+        <h3 class="text-sm font-medium text-gray-300 mb-4 flex items-center gap-2"><i data-lucide="server" class="w-4 h-4 text-brand-400"></i> Server URL</h3>
+        <input id="set-url" type="text" class="w-full bg-surface-1 border border-gray-700 rounded-lg px-3 py-2 text-sm mono focus:outline-none focus:border-brand-500 mb-2">
+        <p class="text-xs text-gray-500">Base URL of the serialink HTTP server.</p>
+      </div>
+      <div class="bg-surface-2 rounded-xl border border-gray-800 p-5">
+        <h3 class="text-sm font-medium text-gray-300 mb-4 flex items-center gap-2"><i data-lucide="clock" class="w-4 h-4 text-brand-400"></i> Polling Interval</h3>
+        <div class="flex items-center gap-3">
+          <input id="set-poll" type="range" min="250" max="5000" step="250" class="flex-1 accent-brand-500">
+          <span id="set-poll-val" class="text-sm mono text-gray-400 w-14 text-right">1000</span><span class="text-xs text-gray-500">ms</span>
+        </div>
+      </div>
+      <button id="set-save" class="bg-brand-600 hover:bg-brand-700 text-white text-sm px-4 py-2.5 rounded-lg flex items-center justify-center gap-2 transition-colors">
+        <i data-lucide="save" class="w-4 h-4"></i> Save Settings
+      </button>
+    </div>
+  </template>
+
+  <script>
+  // ========== API Client ==========
+  class SerialinkAPI {
+    constructor(baseUrl, apiKey) {
+      this.baseUrl = (baseUrl || window.location.origin).replace(/\/$/, '');
+      this.apiKey = apiKey || '';
+    }
+
+    async _fetch(path, opts = {}) {
+      const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
+      if (this.apiKey) headers['X-API-Key'] = this.apiKey;
+      const res = await fetch(this.baseUrl + path, { ...opts, headers });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || 'HTTP ' + res.status);
+      }
+      return res.json();
+    }
+
+    async health() { return this._fetch('/health'); }
+    async listPorts() { return this._fetch('/api/ports'); }
+    async listSessions() { return this._fetch('/api/sessions'); }
+    async openSession(portPath, baudRate) {
+      return this._fetch('/api/sessions', {
+        method: 'POST',
+        body: JSON.stringify({ port_path: portPath, baud_rate: baudRate || 115200 }),
+      });
+    }
+    async closeSession(id) {
+      return this._fetch('/api/sessions/' + encodeURIComponent(id), { method: 'DELETE' });
+    }
+    async readLines(id, count) {
+      return this._fetch('/api/sessions/' + encodeURIComponent(id) + '/lines?count=' + (count || 50));
+    }
+    async writeData(id, data) {
+      return this._fetch('/api/sessions/' + encodeURIComponent(id) + '/write', {
+        method: 'POST',
+        body: JSON.stringify({ data: data }),
+      });
+    }
+    async sendAndExpect(id, data, pattern, timeoutMs) {
+      return this._fetch('/api/sessions/' + encodeURIComponent(id) + '/send-and-expect', {
+        method: 'POST',
+        body: JSON.stringify({ data: data, pattern: pattern, timeout_ms: timeoutMs || 5000 }),
+      });
+    }
+    async snapshot(id, limit) {
+      return this._fetch('/api/sessions/' + encodeURIComponent(id) + '/snapshot?limit=' + (limit || 500));
+    }
+  }
+
+  // ========== Utility ==========
+  function escapeHtml(s) {
+    if (s == null) return '';
+    var d = document.createElement('div');
+    d.appendChild(document.createTextNode(String(s)));
+    return d.innerHTML;
+  }
+
+  function setText(el, text) {
+    if (el) el.textContent = text;
+  }
+
+  function setHTML(el, html) {
+    // Note: all dynamic values passed through escapeHtml() before interpolation
+    if (el) el.innerHTML = html;
+  }
+
+  function showSpinner(el) {
+    if (el) { el.textContent = ''; var sp = document.createElement('span'); sp.className = 'spinner'; el.appendChild(sp); }
+  }
+
+  // ========== App State ==========
+  var api = null;
+  var currentView = 'dashboard';
+  var monitorInterval = null;
+  var monitorSessionId = null;
+  var monitorPaused = false;
+  var monitorLines = [];
+  var monitorFilter = '';
+  var healthOk = false;
+
+  function initAPI() {
+    var baseUrl = localStorage.getItem('serialink_server_url') || window.location.origin;
+    var apiKey = localStorage.getItem('serialink_api_key') || '';
+    api = new SerialinkAPI(baseUrl, apiKey);
+  }
+
+  // ========== Toast ==========
+  function showToast(msg, type) {
+    type = type || 'error';
+    var container = document.getElementById('toast-container');
+    var colors = { error: 'bg-red-900/90 border-red-700', success: 'bg-green-900/90 border-green-700', info: 'bg-blue-900/90 border-blue-700' };
+    var icons = { error: 'alert-circle', success: 'check-circle', info: 'info' };
+    var el = document.createElement('div');
+    el.className = 'toast-enter ' + (colors[type] || colors.info) + ' border rounded-lg px-4 py-3 text-sm text-white flex items-center gap-2 shadow-lg max-w-sm';
+    var icon = document.createElement('i');
+    icon.setAttribute('data-lucide', icons[type] || 'info');
+    icon.className = 'w-4 h-4 shrink-0';
+    el.appendChild(icon);
+    var span = document.createElement('span');
+    span.textContent = msg;
+    el.appendChild(span);
+    container.appendChild(el);
+    lucide.createIcons({ nodes: [el] });
+    setTimeout(function() { el.style.opacity = '0'; el.style.transition = 'opacity 0.3s'; setTimeout(function() { el.remove(); }, 300); }, 4000);
+  }
+
+  // ========== Health Check ==========
+  async function checkHealth() {
+    var dot = document.getElementById('health-dot');
+    var text = document.getElementById('health-text');
+    try {
+      var h = await api.health();
+      dot.className = 'w-2 h-2 rounded-full bg-emerald-500 pulse-dot';
+      setText(text, 'Connected');
+      text.className = 'text-emerald-400';
+      healthOk = true;
+      var ver = 'v' + (h.version || '0.0.0');
+      setText(document.getElementById('sidebar-version'), ver);
+      setText(document.getElementById('topbar-version'), ver);
+    } catch(e) {
+      dot.className = 'w-2 h-2 rounded-full bg-red-500 pulse-dot';
+      setText(text, 'Disconnected');
+      text.className = 'text-red-400';
+      healthOk = false;
+    }
+  }
+
+  // ========== Navigation ==========
+  function switchView(view) {
+    currentView = view;
+    document.querySelectorAll('.sidebar-link').forEach(function(l) {
+      var v = l.dataset.view;
+      l.classList.toggle('active', v === view);
+      l.classList.toggle('text-gray-300', v === view);
+      l.classList.toggle('text-gray-400', v !== view);
+    });
+    var titles = { dashboard: 'Dashboard', monitor: 'Monitor', sessions: 'Sessions', sendexpect: 'Send & Expect', settings: 'Settings' };
+    setText(document.getElementById('view-title'), titles[view] || view);
+    stopMonitor();
+    renderView(view);
+  }
+
+  function renderView(view) {
+    var content = document.getElementById('content');
+    content.textContent = '';
+    var tpl = document.getElementById('tpl-' + view);
+    if (tpl) {
+      var clone = tpl.content.cloneNode(true);
+      content.appendChild(clone);
+      lucide.createIcons({ nodes: [content] });
+    }
+    switch (view) {
+      case 'dashboard': initDashboard(); break;
+      case 'monitor': initMonitor(); break;
+      case 'sessions': initSessions(); break;
+      case 'sendexpect': initSendExpect(); break;
+      case 'settings': initSettings(); break;
+    }
+  }
+
+  // ========== Dashboard View ==========
+  async function initDashboard() {
+    var refreshPorts = document.getElementById('dash-refresh-ports');
+    var refreshSessions = document.getElementById('dash-refresh-sessions');
+    if (refreshPorts) refreshPorts.addEventListener('click', function() { switchView('dashboard'); });
+    if (refreshSessions) refreshSessions.addEventListener('click', function() { switchView('dashboard'); });
+
+    var results = await Promise.allSettled([
+      api.health(),
+      api.listPorts(),
+      api.listSessions(),
+    ]);
+    var healthRes = results[0];
+    var portsRes = results[1];
+    var sessionsRes = results[2];
+
+    // Health
+    var hEl = document.getElementById('dash-health');
+    if (hEl) {
+      hEl.textContent = '';
+      if (healthRes.status === 'fulfilled') {
+        setHTML(hEl, '<span class="text-emerald-400 flex items-center gap-2"><i data-lucide="check-circle" class="w-5 h-5"></i> OK</span>');
+      } else {
+        setHTML(hEl, '<span class="text-red-400 flex items-center gap-2"><i data-lucide="x-circle" class="w-5 h-5"></i> Down</span>');
+      }
+    }
+
+    // Ports
+    var pCountEl = document.getElementById('dash-ports-count');
+    var pEl = document.getElementById('dash-ports');
+    if (portsRes.status === 'fulfilled') {
+      var ports = portsRes.value;
+      setText(pCountEl, String(ports.length));
+      if (pEl) {
+        if (ports.length === 0) {
+          pEl.textContent = '';
+          var noPortsP = document.createElement('p');
+          noPortsP.className = 'text-gray-500 text-sm';
+          noPortsP.textContent = 'No serial ports found.';
+          pEl.appendChild(noPortsP);
+        } else {
+          var portsHtml = ports.map(function(p) {
+            var name = typeof p === 'string' ? p : (p.name || p.port_name || p.path || JSON.stringify(p));
+            var mfr = p.manufacturer ? '<div class="text-xs text-gray-500">' + escapeHtml(p.manufacturer) + '</div>' : '';
+            return '<div class="flex items-center justify-between py-2 border-b border-gray-800/50 last:border-0">' +
+              '<div><div class="text-sm font-medium mono text-gray-200">' + escapeHtml(name) + '</div>' + mfr + '</div>' +
+              '<span class="text-xs bg-surface-4 text-gray-400 px-2 py-0.5 rounded">serial</span></div>';
+          }).join('');
+          setHTML(pEl, portsHtml);
+        }
+      }
+    } else {
+      setText(pCountEl, '-');
+      if (pEl) {
+        pEl.textContent = '';
+        var errP = document.createElement('p');
+        errP.className = 'text-red-400 text-sm';
+        errP.textContent = (portsRes.reason && portsRes.reason.message) || 'Failed to load';
+        pEl.appendChild(errP);
+      }
+    }
+
+    // Sessions
+    var sCountEl = document.getElementById('dash-sessions-count');
+    var sEl = document.getElementById('dash-sessions');
+    if (sessionsRes.status === 'fulfilled') {
+      var sessions = sessionsRes.value;
+      var list = Array.isArray(sessions) ? sessions : (sessions.sessions || []);
+      setText(sCountEl, String(list.length));
+      if (sEl) {
+        if (list.length === 0) {
+          sEl.textContent = '';
+          var noSessP = document.createElement('p');
+          noSessP.className = 'text-gray-500 text-sm';
+          noSessP.textContent = 'No active sessions.';
+          sEl.appendChild(noSessP);
+        } else {
+          var sessHtml = list.map(function(s) {
+            var sid = s.session_id || s.id || '';
+            var port = s.port_path || s.port || '';
+            var baud = s.baud_rate || '?';
+            var status = s.status || 'active';
+            return '<div class="flex items-center justify-between py-2 border-b border-gray-800/50 last:border-0">' +
+              '<div><div class="text-sm font-medium mono text-gray-200">' + escapeHtml(sid) + '</div>' +
+              '<div class="text-xs text-gray-500">' + escapeHtml(port) + ' @ ' + escapeHtml(String(baud)) + '</div></div>' +
+              '<span class="text-xs bg-emerald-900/50 text-emerald-400 px-2 py-0.5 rounded">' + escapeHtml(status) + '</span></div>';
+          }).join('');
+          setHTML(sEl, sessHtml);
+        }
+      }
+    } else {
+      setText(sCountEl, '-');
+      if (sEl) {
+        sEl.textContent = '';
+        var errP2 = document.createElement('p');
+        errP2.className = 'text-red-400 text-sm';
+        errP2.textContent = (sessionsRes.reason && sessionsRes.reason.message) || 'Failed to load';
+        sEl.appendChild(errP2);
+      }
+    }
+    lucide.createIcons();
+  }
+
+  // ========== Monitor View ==========
+  function initMonitor() {
+    document.getElementById('mon-connect').addEventListener('click', monitorConnect);
+    document.getElementById('mon-disconnect').addEventListener('click', monitorDisconnect);
+    document.getElementById('mon-filter').addEventListener('input', function(e) { monitorFilter = e.target.value; renderMonitorLines(); });
+    document.getElementById('mon-pause').addEventListener('click', toggleMonitorPause);
+    document.getElementById('mon-clear').addEventListener('click', clearMonitor);
+    document.getElementById('mon-download').addEventListener('click', downloadMonitor);
+    document.getElementById('mon-write-btn').addEventListener('click', monitorWrite);
+    document.getElementById('mon-write-input').addEventListener('keydown', function(e) { if (e.key === 'Enter') monitorWrite(); });
+    loadMonitorPorts();
+  }
+
+  async function loadMonitorPorts() {
+    try {
+      var ports = await api.listPorts();
+      var sel = document.getElementById('mon-port');
+      if (!sel) return;
+      ports.forEach(function(p) {
+        var name = typeof p === 'string' ? p : (p.name || p.port_name || p.path || '');
+        var opt = document.createElement('option');
+        opt.value = name;
+        opt.textContent = name;
+        sel.appendChild(opt);
+      });
+    } catch (e) { showToast('Failed to load ports: ' + e.message); }
+  }
+
+  async function monitorConnect() {
+    var port = document.getElementById('mon-port').value;
+    var baud = parseInt(document.getElementById('mon-baud').value) || 115200;
+    if (!port) { showToast('Please select a port', 'info'); return; }
+    var btn = document.getElementById('mon-connect');
+    try {
+      showSpinner(btn);
+      var res = await api.openSession(port, baud);
+      monitorSessionId = res.session_id;
+      monitorLines = [];
+      monitorPaused = false;
+      btn.classList.add('hidden');
+      document.getElementById('mon-disconnect').classList.remove('hidden');
+      var term = document.getElementById('mon-terminal');
+      term.textContent = '';
+      var line = document.createElement('div');
+      line.className = 'text-emerald-400 terminal-line';
+      line.textContent = 'Connected to ' + port + ' @ ' + baud;
+      term.appendChild(line);
+      showToast('Connected to ' + port, 'success');
+      startMonitorPolling();
+    } catch (e) {
+      showToast('Connection failed: ' + e.message);
+      setHTML(btn, '<i data-lucide="play" class="w-4 h-4"></i> Connect');
+      lucide.createIcons({ nodes: [btn] });
+    }
+  }
+
+  async function monitorDisconnect() {
+    stopMonitor();
+    if (monitorSessionId) {
+      try { await api.closeSession(monitorSessionId); } catch(e) {}
+      monitorSessionId = null;
+    }
+    var connectBtn = document.getElementById('mon-connect');
+    connectBtn.classList.remove('hidden');
+    setHTML(connectBtn, '<i data-lucide="play" class="w-4 h-4"></i> Connect');
+    document.getElementById('mon-disconnect').classList.add('hidden');
+    lucide.createIcons({ nodes: [connectBtn] });
+    showToast('Disconnected', 'info');
+  }
+
+  function startMonitorPolling() {
+    var pollMs = parseInt(localStorage.getItem('serialink_poll_interval') || '1000');
+    monitorInterval = setInterval(async function() {
+      if (monitorPaused || !monitorSessionId) return;
+      try {
+        var lines = await api.readLines(monitorSessionId, 100);
+        if (!lines || !Array.isArray(lines)) return;
+        monitorLines = lines;
+        renderMonitorLines();
+      } catch (e) {
+        if (e.message && (e.message.indexOf('not found') >= 0 || e.message.indexOf('404') >= 0)) {
+          stopMonitor();
+          monitorSessionId = null;
+          showToast('Session lost', 'error');
+        }
+      }
+    }, pollMs);
+  }
+
+  function stopMonitor() {
+    if (monitorInterval) { clearInterval(monitorInterval); monitorInterval = null; }
+  }
+
+  function renderMonitorLines() {
+    var term = document.getElementById('mon-terminal');
+    if (!term) return;
+    var lines = monitorLines;
+    if (monitorFilter) {
+      try {
+        var re = new RegExp(monitorFilter, 'i');
+        lines = lines.filter(function(l) { return re.test(l.content); });
+      } catch(e) {}
+    }
+    term.textContent = '';
+    lines.forEach(function(l) {
+      var ts = l.timestamp ? new Date(l.timestamp).toLocaleTimeString() : '';
+      var content = l.content || '';
+      var color = 'text-gray-300';
+      if (/\bERROR\b/i.test(content)) color = 'text-red-400';
+      else if (/\bWARN(ING)?\b/i.test(content)) color = 'text-yellow-400';
+      else if (/\bINFO\b/i.test(content)) color = 'text-emerald-400';
+      else if (/\bDEBUG\b/i.test(content)) color = 'text-gray-500';
+      var div = document.createElement('div');
+      div.className = 'terminal-line ' + color;
+      var tsSpan = document.createElement('span');
+      tsSpan.className = 'text-gray-600 mr-2';
+      tsSpan.textContent = ts;
+      div.appendChild(tsSpan);
+      div.appendChild(document.createTextNode(content));
+      term.appendChild(div);
+    });
+    term.scrollTop = term.scrollHeight;
+  }
+
+  function toggleMonitorPause() {
+    monitorPaused = !monitorPaused;
+    var btn = document.getElementById('mon-pause');
+    if (btn) {
+      setHTML(btn, monitorPaused
+        ? '<i data-lucide="play" class="w-4 h-4"></i>'
+        : '<i data-lucide="pause" class="w-4 h-4"></i>');
+      lucide.createIcons({ nodes: [btn] });
+    }
+  }
+
+  function clearMonitor() {
+    monitorLines = [];
+    var term = document.getElementById('mon-terminal');
+    if (term) {
+      term.textContent = '';
+      var div = document.createElement('div');
+      div.className = 'text-gray-600 text-center py-8';
+      div.textContent = 'Cleared';
+      term.appendChild(div);
+    }
+  }
+
+  function downloadMonitor() {
+    var blob = new Blob([JSON.stringify(monitorLines, null, 2)], { type: 'application/json' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'serialink-monitor-' + Date.now() + '.json';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  async function monitorWrite() {
+    var input = document.getElementById('mon-write-input');
+    if (!input || !input.value || !monitorSessionId) return;
+    try {
+      await api.writeData(monitorSessionId, input.value);
+      input.value = '';
+    } catch (e) { showToast('Write failed: ' + e.message); }
+  }
+
+  // ========== Sessions View ==========
+  async function initSessions() {
+    document.getElementById('sess-open-btn').addEventListener('click', openSessionAction);
+    document.getElementById('sess-refresh').addEventListener('click', function() { switchView('sessions'); });
+    await loadSessionsTable();
+  }
+
+  async function loadSessionsTable() {
+    var tEl = document.getElementById('sess-table');
+    try {
+      var sessions = await api.listSessions();
+      var list = Array.isArray(sessions) ? sessions : (sessions.sessions || []);
+      if (!tEl) return;
+      tEl.textContent = '';
+      if (list.length === 0) {
+        var p = document.createElement('p');
+        p.className = 'text-gray-500 text-sm';
+        p.textContent = 'No active sessions.';
+        tEl.appendChild(p);
+      } else {
+        var wrapper = document.createElement('div');
+        wrapper.className = 'overflow-x-auto';
+        var table = document.createElement('table');
+        table.className = 'w-full text-sm';
+
+        var thead = document.createElement('thead');
+        var headRow = document.createElement('tr');
+        headRow.className = 'text-xs text-gray-500 uppercase border-b border-gray-800';
+        ['ID', 'Port', 'Baud', 'Status', 'Actions'].forEach(function(h, i) {
+          var th = document.createElement('th');
+          th.className = 'pb-2 font-medium ' + (i === 4 ? 'text-right' : 'text-left');
+          th.textContent = h;
+          headRow.appendChild(th);
+        });
+        thead.appendChild(headRow);
+        table.appendChild(thead);
+
+        var tbody = document.createElement('tbody');
+        list.forEach(function(s) {
+          var sid = s.session_id || s.id || '';
+          var port = s.port_path || s.port || '';
+          var baud = s.baud_rate || '-';
+          var status = s.status || 'active';
+
+          var tr = document.createElement('tr');
+          tr.className = 'border-b border-gray-800/50';
+
+          var tdId = document.createElement('td');
+          tdId.className = 'py-2 mono text-gray-300 text-xs';
+          tdId.textContent = sid;
+          tr.appendChild(tdId);
+
+          var tdPort = document.createElement('td');
+          tdPort.className = 'py-2 mono text-gray-300';
+          tdPort.textContent = port;
+          tr.appendChild(tdPort);
+
+          var tdBaud = document.createElement('td');
+          tdBaud.className = 'py-2 text-gray-400';
+          tdBaud.textContent = String(baud);
+          tr.appendChild(tdBaud);
+
+          var tdStatus = document.createElement('td');
+          tdStatus.className = 'py-2';
+          var badge = document.createElement('span');
+          badge.className = 'text-xs bg-emerald-900/50 text-emerald-400 px-2 py-0.5 rounded';
+          badge.textContent = status;
+          tdStatus.appendChild(badge);
+          tr.appendChild(tdStatus);
+
+          var tdActions = document.createElement('td');
+          tdActions.className = 'py-2 text-right';
+          var closeBtn = document.createElement('button');
+          closeBtn.className = 'text-xs text-red-400 hover:text-red-300 flex items-center gap-1 ml-auto';
+          closeBtn.textContent = 'Close';
+          closeBtn.addEventListener('click', function() { closeSessionAction(sid); });
+          var closeIcon = document.createElement('i');
+          closeIcon.setAttribute('data-lucide', 'x');
+          closeIcon.className = 'w-3 h-3';
+          closeBtn.insertBefore(closeIcon, closeBtn.firstChild);
+          tdActions.appendChild(closeBtn);
+          tr.appendChild(tdActions);
+
+          tbody.appendChild(tr);
+        });
+        table.appendChild(tbody);
+        wrapper.appendChild(table);
+        tEl.appendChild(wrapper);
+        lucide.createIcons({ nodes: [tEl] });
+      }
+    } catch (e) {
+      if (tEl) {
+        tEl.textContent = '';
+        var errP = document.createElement('p');
+        errP.className = 'text-red-400 text-sm';
+        errP.textContent = e.message;
+        tEl.appendChild(errP);
+      }
+    }
+  }
+
+  async function openSessionAction() {
+    var port = document.getElementById('sess-port').value.trim();
+    var baud = parseInt(document.getElementById('sess-baud').value) || 115200;
+    if (!port) { showToast('Port path is required', 'info'); return; }
+    var btn = document.getElementById('sess-open-btn');
+    try {
+      showSpinner(btn);
+      await api.openSession(port, baud);
+      showToast('Session opened', 'success');
+      setHTML(btn, '<i data-lucide="plus" class="w-4 h-4"></i> Open');
+      lucide.createIcons({ nodes: [btn] });
+      await loadSessionsTable();
+    } catch (e) {
+      showToast('Failed: ' + e.message);
+      setHTML(btn, '<i data-lucide="plus" class="w-4 h-4"></i> Open');
+      lucide.createIcons({ nodes: [btn] });
+    }
+  }
+
+  async function closeSessionAction(id) {
+    try {
+      await api.closeSession(id);
+      showToast('Session closed', 'success');
+      await loadSessionsTable();
+    } catch (e) { showToast('Failed: ' + e.message); }
+  }
+
+  // ========== Send & Expect View ==========
+  function initSendExpect() {
+    document.getElementById('se-timeout').addEventListener('input', function(e) {
+      setText(document.getElementById('se-timeout-val'), e.target.value);
+    });
+    document.getElementById('se-exec-btn').addEventListener('click', executeSendExpect);
+    document.getElementById('se-cmd').addEventListener('keydown', function(e) {
+      if (e.ctrlKey && e.key === 'Enter') executeSendExpect();
+    });
+    document.getElementById('se-clear-history').addEventListener('click', function() {
+      localStorage.removeItem('serialink_cmd_history');
+      renderHistory();
+    });
+    loadSeSessions();
+    renderHistory();
+  }
+
+  function renderHistory() {
+    var container = document.getElementById('se-history');
+    if (!container) return;
+    container.textContent = '';
+    var history = JSON.parse(localStorage.getItem('serialink_cmd_history') || '[]');
+    if (history.length === 0) {
+      var p = document.createElement('p');
+      p.className = 'text-gray-500 text-xs';
+      p.textContent = 'No history yet.';
+      container.appendChild(p);
+      return;
+    }
+    history.slice(-20).reverse().forEach(function(h) {
+      var btn = document.createElement('button');
+      btn.className = 'text-left text-xs mono bg-surface-1 rounded px-2 py-1.5 hover:bg-surface-3 transition-colors truncate text-gray-400 w-full';
+      var cmdSpan = document.createElement('span');
+      cmdSpan.className = 'text-gray-500';
+      cmdSpan.textContent = h.cmd;
+      btn.appendChild(cmdSpan);
+      btn.appendChild(document.createTextNode(' expect: '));
+      var patSpan = document.createElement('span');
+      patSpan.className = 'text-brand-400';
+      patSpan.textContent = h.pattern;
+      btn.appendChild(patSpan);
+      btn.addEventListener('click', function() {
+        document.getElementById('se-cmd').value = h.cmd;
+        document.getElementById('se-pattern').value = h.pattern;
+      });
+      container.appendChild(btn);
+    });
+  }
+
+  async function loadSeSessions() {
+    try {
+      var sessions = await api.listSessions();
+      var list = Array.isArray(sessions) ? sessions : (sessions.sessions || []);
+      var sel = document.getElementById('se-session');
+      if (!sel) return;
+      sel.textContent = '';
+      if (list.length === 0) {
+        var opt = document.createElement('option');
+        opt.value = '';
+        opt.textContent = 'No sessions available';
+        sel.appendChild(opt);
+      } else {
+        list.forEach(function(s) {
+          var sid = s.session_id || s.id || '';
+          var port = s.port_path || s.port || '';
+          var opt = document.createElement('option');
+          opt.value = sid;
+          opt.textContent = sid + ' - ' + port;
+          sel.appendChild(opt);
+        });
+      }
+    } catch (e) { showToast('Failed to load sessions: ' + e.message); }
+  }
+
+  async function executeSendExpect() {
+    var sessionId = document.getElementById('se-session').value;
+    var cmd = document.getElementById('se-cmd').value;
+    var pattern = document.getElementById('se-pattern').value;
+    var timeout = parseInt(document.getElementById('se-timeout').value) * 1000;
+    if (!sessionId) { showToast('Select a session', 'info'); return; }
+    if (!cmd) { showToast('Enter a command', 'info'); return; }
+    if (!pattern) { showToast('Enter an expected pattern', 'info'); return; }
+
+    var btn = document.getElementById('se-exec-btn');
+    var resultEl = document.getElementById('se-result');
+    showSpinner(btn);
+    resultEl.textContent = '';
+    var waitDiv = document.createElement('div');
+    waitDiv.className = 'text-gray-500 text-center py-8';
+    var waitSpinner = document.createElement('span');
+    waitSpinner.className = 'spinner';
+    waitDiv.appendChild(waitSpinner);
+    waitDiv.appendChild(document.createTextNode(' Waiting for response...'));
+    resultEl.appendChild(waitDiv);
+    btn.disabled = true;
+
+    try {
+      var res = await api.sendAndExpect(sessionId, cmd, pattern, timeout);
+      // Save to history
+      var history = JSON.parse(localStorage.getItem('serialink_cmd_history') || '[]');
+      history.push({ cmd: cmd, pattern: pattern, ts: Date.now() });
+      if (history.length > 50) history.splice(0, history.length - 50);
+      localStorage.setItem('serialink_cmd_history', JSON.stringify(history));
+      renderHistory();
+
+      var matched = res.matched;
+      var lines = res.collected_lines || [];
+      var matchedLine = res.matched_line || '';
+
+      resultEl.textContent = '';
+
+      // Status badge
+      var statusDiv = document.createElement('div');
+      statusDiv.className = 'mb-3 flex items-center gap-2';
+      var badge = document.createElement('span');
+      if (matched) {
+        badge.className = 'bg-emerald-900/50 text-emerald-400 px-2 py-0.5 rounded text-xs flex items-center gap-1';
+        badge.textContent = 'Matched';
+      } else {
+        badge.className = 'bg-red-900/50 text-red-400 px-2 py-0.5 rounded text-xs flex items-center gap-1';
+        badge.textContent = 'Not Matched';
+      }
+      statusDiv.appendChild(badge);
+      if (res.error) {
+        var errSpan = document.createElement('span');
+        errSpan.className = 'text-yellow-400 text-xs';
+        errSpan.textContent = '(' + res.error + ')';
+        statusDiv.appendChild(errSpan);
+      }
+      resultEl.appendChild(statusDiv);
+
+      // Matched line highlight
+      if (matchedLine) {
+        var hlDiv = document.createElement('div');
+        hlDiv.className = 'mb-3 p-2 bg-emerald-900/20 border border-emerald-800/50 rounded text-emerald-300';
+        hlDiv.textContent = matchedLine;
+        resultEl.appendChild(hlDiv);
+      }
+
+      // Collected lines header
+      var headerDiv = document.createElement('div');
+      headerDiv.className = 'text-xs text-gray-500 mb-2';
+      headerDiv.textContent = 'Collected lines (' + lines.length + '):';
+      resultEl.appendChild(headerDiv);
+
+      // Lines
+      var linesContainer = document.createElement('div');
+      linesContainer.className = 'flex flex-col gap-0.5';
+      lines.forEach(function(l) {
+        var lineDiv = document.createElement('div');
+        var isMatch = l === matchedLine;
+        lineDiv.className = 'terminal-line ' + (isMatch ? 'bg-emerald-900/20 text-emerald-300 px-1 rounded' : 'text-gray-400');
+        lineDiv.textContent = l;
+        linesContainer.appendChild(lineDiv);
+      });
+      resultEl.appendChild(linesContainer);
+
+    } catch (e) {
+      resultEl.textContent = '';
+      var errDiv = document.createElement('div');
+      errDiv.className = 'text-red-400 text-center py-4';
+      errDiv.textContent = e.message;
+      resultEl.appendChild(errDiv);
+    } finally {
+      setHTML(btn, '<i data-lucide="zap" class="w-4 h-4"></i> Execute <span class="text-xs text-brand-300">(Ctrl+Enter)</span>');
+      btn.disabled = false;
+      lucide.createIcons({ nodes: [btn] });
+    }
+  }
+
+  // ========== Settings View ==========
+  function initSettings() {
+    var apiKey = localStorage.getItem('serialink_api_key') || '';
+    var serverUrl = localStorage.getItem('serialink_server_url') || window.location.origin;
+    var pollInterval = localStorage.getItem('serialink_poll_interval') || '1000';
+    document.getElementById('set-apikey').value = apiKey;
+    document.getElementById('set-url').value = serverUrl;
+    document.getElementById('set-poll').value = pollInterval;
+    setText(document.getElementById('set-poll-val'), pollInterval);
+    document.getElementById('set-poll').addEventListener('input', function(e) {
+      setText(document.getElementById('set-poll-val'), e.target.value);
+    });
+    document.getElementById('set-save').addEventListener('click', saveSettings);
+  }
+
+  function saveSettings() {
+    var apiKey = document.getElementById('set-apikey').value;
+    var serverUrl = document.getElementById('set-url').value;
+    var pollInterval = document.getElementById('set-poll').value;
+    localStorage.setItem('serialink_api_key', apiKey);
+    localStorage.setItem('serialink_server_url', serverUrl);
+    localStorage.setItem('serialink_poll_interval', pollInterval);
+    initAPI();
+    showToast('Settings saved', 'success');
+    checkHealth();
+  }
+
+  // ========== Init ==========
+  document.addEventListener('DOMContentLoaded', function() {
+    initAPI();
+    lucide.createIcons();
+    checkHealth();
+    setInterval(checkHealth, 10000);
+    switchView('dashboard');
+
+    // Sidebar navigation
+    document.querySelectorAll('.sidebar-link').forEach(function(link) {
+      link.addEventListener('click', function(e) {
+        e.preventDefault();
+        switchView(link.dataset.view);
+      });
+    });
+
+    // Mobile sidebar toggle
+    document.getElementById('sidebar-toggle').addEventListener('click', function() {
+      var sb = document.getElementById('sidebar');
+      sb.classList.toggle('hidden');
+      sb.classList.toggle('absolute');
+      sb.classList.toggle('z-40');
+      sb.classList.toggle('h-full');
+    });
+
+    // Global keyboard shortcuts
+    document.addEventListener('keydown', function(e) {
+      if (e.ctrlKey && e.key === 'Enter' && currentView === 'sendexpect') {
+        executeSendExpect();
+      }
+    });
+  });
+  </script>
+</body>
+</html>

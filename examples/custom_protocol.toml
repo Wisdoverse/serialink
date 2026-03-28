@@ -1,0 +1,19 @@
+# Custom length-prefixed binary protocol
+# Use with: serialink --config examples/custom_protocol.toml monitor /dev/ttyUSB0 --json
+
+[protocol]
+name = "my_sensor"
+frame_timeout_ms = 500
+max_frame_size = 512
+
+[protocol.framing]
+type = "length_prefixed"
+start = [0xAA, 0x55]
+length_offset = 2
+length_size = 2
+length_endian = "big"
+length_includes_header = false
+trailer_size = 1
+
+[protocol.checksum]
+type = "crc8"

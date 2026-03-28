@@ -1,0 +1,11 @@
+# Modbus RTU protocol configuration
+# Use with: serialink --config examples/modbus_rtu.toml monitor /dev/ttyUSB0 --json
+
+[protocol]
+name = "modbus_rtu"
+
+[protocol.framing]
+type = "modbus_rtu_gap"
+
+[protocol.checksum]
+type = "crc16_modbus"
