@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 
 // Re-export the canonical pipeline config types. These are the only
 // PipelineStepConfig definitions in the codebase — do not duplicate them here.
+use crate::harness::schema::{DeviceConfig as HarnessDeviceConfig, HarnessMetadata, StepConfig};
 #[allow(unused_imports)]
 pub use crate::pipeline::engine::{FilterModeConfig, LogFormatConfig, PipelineStepConfig};
 use crate::protocol::types::FrameConfig;
@@ -24,6 +25,12 @@ pub struct SerialinkConfig {
     pub pipeline: Vec<PipelineStepConfig>,
     pub serve: Option<ServeConfig>,
     pub protocol: Option<ProtocolConfig>,
+    // Harness fields — ignored by non-test commands.
+    pub harness: Option<HarnessMetadata>,
+    #[serde(default, rename = "device")]
+    pub devices: Vec<HarnessDeviceConfig>,
+    #[serde(default, rename = "step")]
+    pub steps: Vec<StepConfig>,
 }
 
 /// Serial port configuration as it appears in a TOML config file.

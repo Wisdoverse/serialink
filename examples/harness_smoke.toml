@@ -1,0 +1,30 @@
+# examples/harness_smoke.toml
+# Example test harness: open a device, send AT command, check response.
+
+[harness]
+name = "smoke_test"
+timeout = 30
+
+[[device]]
+name = "dut"
+port = "/dev/ttyUSB0"
+baud_rate = 115200
+
+[[step]]
+id = "open"
+device = "dut"
+action = "open_port"
+
+[[step]]
+id = "init"
+depends_on = ["open"]
+device = "dut"
+action = "send_and_expect"
+params = { data = "AT\r\n", expect = "OK", timeout = 5 }
+
+[[step]]
+id = "cleanup"
+depends_on = ["init"]
+device = "dut"
+action = "close_port"
+on_fail = "continue"

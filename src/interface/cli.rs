@@ -5,6 +5,8 @@ use tracing::info;
 
 use crate::config::ProtocolConfig;
 use crate::exit_codes;
+use crate::harness::executor;
+use crate::harness::schema::HarnessConfig;
 use crate::protocol::format;
 use crate::serial::discovery;
 use crate::serial::manager::SessionManager;
@@ -281,4 +283,87 @@ pub async fn cmd_send(
     manager.close_session(&session_id).await?;
 
     Ok(exit_code)
+}
+
+pub async fn cmd_test(cfg: crate::config::SerialinkConfig, json: bool) -> i32 {
+    let harness_meta = match cfg.harness {
+        Some(h) => h,
+        None => {
+            let msg = "Config file has no [harness] section";
+            if json {
+                eprintln!(
+                    "{}",
+                    serde_json::json!({"error": "invalid_input", "message": msg})
+                );
+            } else {
+                eprintln!("Error: {}", msg);
+            }
+            return crate::exit_codes::INVALID_INPUT;
+        }
+    };
+
+    if cfg.devices.is_empty() {
+        let msg = "Config file has no [[device]] entries";
+        if json {
+            eprintln!(
+                "{}",
+                serde_json::json!({"error": "invalid_input", "message": msg})
+            );
+        } else {
+            eprintln!("Error: {}", msg);
+        }
+        return crate::exit_codes::INVALID_INPUT;
+    }
+
+    if cfg.steps.is_empty() {
+        let msg = "Config file has no [[step]] entries";
+        if json {
+            eprintln!(
+                "{}",
+                serde_json::json!({"error": "invalid_input", "message": msg})
+            );
+        } else {
+            eprintln!("Error: {}", msg);
+        }
+        return crate::exit_codes::INVALID_INPUT;
+    }
+
+    let harness_config = HarnessConfig {
+        harness: harness_meta,
+        devices: cfg.devices,
+        steps: cfg.steps,
+    };
+
+    let report = executor::run_harness(&harness_config).await;
+
+    if json {
+        println!("{}", serde_json::to_string(&report).unwrap_or_default());
+    } else {
+        println!("Harness: {}", report.harness);
+        println!("Result:  {:?}", report.result);
+        println!("Duration: {}ms", report.duration_ms);
+        println!();
+        println!(
+            "{:<20} {:<20} {:<10} {:<10} ERROR",
+            "STEP", "ACTION", "RESULT", "TIME(ms)"
+        );
+        println!("{}", "-".repeat(80));
+        for s in &report.steps {
+            println!(
+                "{:<20} {:<20} {:<10} {:<10} {}",
+                s.id,
+                s.action,
+                format!("{:?}", s.result),
+                s.duration_ms,
+                s.error.as_deref().unwrap_or(""),
+            );
+        }
+    }
+
+    match report.result {
+        crate::harness::schema::HarnessResult::Pass => crate::exit_codes::SUCCESS,
+        crate::harness::schema::HarnessResult::Fail => crate::exit_codes::PATTERN_NOT_MATCHED,
+        crate::harness::schema::HarnessResult::Timeout => crate::exit_codes::TIMEOUT,
+        crate::harness::schema::HarnessResult::Aborted => crate::exit_codes::PATTERN_NOT_MATCHED,
+    }
 }

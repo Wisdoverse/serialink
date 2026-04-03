@@ -3,6 +3,7 @@ use tracing_subscriber::EnvFilter;
 
 mod config;
 mod exit_codes;
+mod harness;
 mod interface;
 mod pipeline;
 mod protocol;
@@ -82,6 +83,9 @@ enum Commands {
         #[arg(short, long, default_value = "10")]
         timeout: u64,
     },
+
+    /// Run a test harness defined in the config file
+    Test {},
 
     /// Start as a server (MCP, SSE, or HTTP)
     Serve {
@@ -274,6 +278,15 @@ async fn run_inner(cli: Cli, format: OutputFormat) -> anyhow::Result<i32> {
                 is_json,
             )
             .await?;
+            Ok(result)
+        }
+        Commands::Test {} => {
+            let cfg = if let Some(config_path) = &cli.config {
+                config::load_config(config_path)?
+            } else {
+                anyhow::bail!("--config is required for the test command. Provide a TOML file with [harness], [[device]], and [[step]] sections.");
+            };
+            let result = interface::cli::cmd_test(cfg, is_json).await;
             Ok(result)
         }
         Commands::Serve {

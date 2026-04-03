@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added / 新增
+
+- **Multi-device test harness** -- DAG-based orchestration of multiple serial devices. TOML config with `[harness]`, `[[device]]`, `[[step]]` sections. Supports parallel execution, dependency ordering, and configurable failure policies (abort/continue/ignore).
+  - **多设备测试编排** -- 基于 DAG 的多串口设备编排。TOML 配置包含 `[harness]`、`[[device]]`、`[[step]]` 段。支持并行执行、依赖排序和可配置的失败策略（abort/continue/ignore）。
+- New CLI subcommand: `serialink --config harness.toml test`
+  - 新增 CLI 子命令：`serialink --config harness.toml test`
+- New MCP tool: `run_harness` -- submit test harness config as JSON (10 tools total).
+  - 新增 MCP 工具：`run_harness` -- 以 JSON 提交测试编排配置（共 10 个工具）。
+- New HTTP endpoint: `POST /api/harness/run`
+  - 新增 HTTP 端点：`POST /api/harness/run`
+- 7 built-in step actions: `open_port`, `close_port`, `send_and_expect`, `write_data`, `read_lines`, `snapshot`, `delay`.
+  - 7 个内建步骤动作：`open_port`、`close_port`、`send_and_expect`、`write_data`、`read_lines`、`snapshot`、`delay`。
+- **Pre-built binary releases** -- 6-platform CI/CD pipeline via GitHub Actions (already in release.yml).
+  - **预编译二进制发布** -- 通过 GitHub Actions 的 6 平台 CI/CD 流水线（已在 release.yml 中）。
+
 ## [0.2.0] - 2026-04-03
 
 ### Added / 新增

@@ -30,6 +30,7 @@ Open `http://localhost:8600` for the built-in web dashboard.
 | POST | `/api/sessions/{id}/send-and-expect` | Send + wait for pattern |
 | GET | `/api/sessions/{id}/snapshot?limit=500` | Get buffer snapshot |
 | DELETE | `/api/sessions/{id}` | Close session |
+| POST | `/api/harness/run` | Run a multi-device test harness | Yes |
 
 ## Authentication
 
@@ -64,6 +65,46 @@ curl -X POST -H "X-API-Key: YOUR_KEY" -H "Content-Type: application/json" \
 curl -X POST -H "X-API-Key: YOUR_KEY" -H "Content-Type: application/json" \
   -d '{"data": "AT\r\n", "pattern": "OK", "timeout_ms": 5000}' \
   http://localhost:8600/api/sessions/{id}/send-and-expect
+```
+
+### Run Test Harness
+
+Run a multi-device test harness that orchestrates open, send, expect, and close
+actions across multiple serial ports with dependency ordering.
+
+- **Method:** `POST /api/harness/run`
+- **Auth:** Required (`X-API-Key` header)
+- **Request body:** JSON with `harness`, `device[]`, `step[]`
+- **Response:** `HarnessReport` JSON (always 200 for an executed harness, 422 for validation errors)
+- **Limits:** max 16 devices, 256 steps, 300s timeout
+
+```bash
+curl -X POST http://localhost:8600/api/harness/run \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: YOUR_KEY" \
+  -d '{
+    "harness": {"name": "smoke", "timeout": 30},
+    "device": [{"name": "dut", "port": "/dev/ttyUSB0", "baud_rate": 115200}],
+    "step": [
+      {"id": "open", "device": "dut", "action": "open_port"},
+      {"id": "check", "depends_on": ["open"], "device": "dut", "action": "send_and_expect", "params": {"data": "AT\r\n", "expect": "OK", "timeout": 5}}
+    ]
+  }'
+```
+
+Example response:
+
+```json
+{
+  "harness": "smoke",
+  "passed": true,
+  "duration_ms": 1234,
+  "steps": [
+    {"id": "open", "status": "passed", "duration_ms": 52},
+    {"id": "check", "status": "passed", "duration_ms": 1180, "output": "OK"}
+  ],
+  "devices_used": ["dut"]
+}
 ```
 
 ## Security Notes
@@ -101,6 +142,7 @@ serialink serve --http --bind 0.0.0.0:8600 --api-key YOUR_SECRET_KEY
 | POST | `/api/sessions/{id}/send-and-expect` | 写入数据并等待匹配结果 |
 | GET | `/api/sessions/{id}/snapshot?limit=500` | 获取缓冲区快照 |
 | DELETE | `/api/sessions/{id}` | 关闭会话 |
+| POST | `/api/harness/run` | 运行多设备测试 harness |
 
 **认证：** 可以通过 `--api-key` 参数或 `SERIALINK_API_KEY` 环境变量设置。
 请求里需要把密钥放到 `X-API-Key` 请求头。

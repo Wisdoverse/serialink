@@ -686,3 +686,92 @@ async fn test_open_port_with_protocol_empty_string() {
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
+
+// ---------------------------------------------------------------------------
+// Harness endpoint tests
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn harness_run_returns_failure_for_invalid_device() {
+    let app = test_app();
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/harness/run")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{
+                        "harness": { "name": "test" },
+                        "device": [{ "name": "dut", "port": "/dev/ttyUSB0" }],
+                        "step": [{ "id": "a", "device": "nonexistent", "action": "open_port" }]
+                    }"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert_eq!(json["result"], "fail");
+}
+
+#[tokio::test]
+async fn harness_run_rejects_too_many_devices() {
+    let app = test_app();
+
+    // Build 17 devices
+    let devices: Vec<serde_json::Value> = (0..17)
+        .map(|i| {
+            serde_json::json!({
+                "name": format!("dev{}", i),
+                "port": format!("/dev/ttyUSB{}", i)
+            })
+        })
+        .collect();
+
+    let body = serde_json::json!({
+        "harness": { "name": "too-many" },
+        "device": devices,
+        "step": []
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/harness/run")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&body).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn harness_run_requires_auth_when_api_key_set() {
+    let app = test_app_with_key("secret123");
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/harness/run")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{
+                        "harness": { "name": "test" },
+                        "device": [],
+                        "step": []
+                    }"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}

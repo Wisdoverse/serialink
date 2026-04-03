@@ -242,6 +242,53 @@ PR 里请包含：
 - `ARCHITECTURE.md` 用于运行时和系统设计
 - `CHANGELOG.md` 用于已发布行为
 
+## Module Guide / 模块指南
+
+The codebase has four major areas. Knowing where to make changes helps
+reviewers and reduces churn.
+
+| Area | Directory | When to touch |
+|------|-----------|---------------|
+| Serial abstraction | `src/serial/` | Port I/O, session lifecycle, read strategies |
+| Pipeline | `src/pipeline/` | Data transforms (timestamp, regex_filter, log_level) |
+| Protocol | `src/protocol/` | Binary framing, checksums, Modbus decoders |
+| **Harness** | `src/harness/` | Multi-device test orchestration (DAG, executor) |
+| Interface | `src/interface/` | CLI, MCP server, HTTP API |
+
+### When Adding Harness Step Actions
+
+If you add a new action type to the test harness:
+
+1. Add the action name to `VALID_ACTIONS` in `src/harness/dag.rs`.
+2. Add a match arm in `execute_step()` in `src/harness/executor.rs`.
+3. Add unit tests for the action in `executor.rs`.
+4. Document the action in `docs/CONFIGURATION.md` (harness section).
+5. Update the MCP tool schema in `src/interface/mcp.rs` (`run_harness` tool description).
+
+### When Adding MCP Tools
+
+See `CLAUDE.md` → "When Adding MCP Tools" for the checklist.
+
+代码库有四个主要区域。清楚在哪里修改有助于减少评审负担。
+
+| 区域 | 目录 | 何时修改 |
+|------|------|---------|
+| 串口抽象 | `src/serial/` | 端口 I/O、会话生命周期、读取策略 |
+| 数据管道 | `src/pipeline/` | 数据转换（时间戳、正则过滤、日志级别） |
+| 协议 | `src/protocol/` | 二进制帧、校验和、Modbus 解码器 |
+| **测试编排** | `src/harness/` | 多设备 DAG 编排、执行引擎 |
+| 接口 | `src/interface/` | CLI、MCP 服务器、HTTP API |
+
+### 添加 Harness 步骤动作
+
+如果要为测试编排添加新的动作类型：
+
+1. 在 `src/harness/dag.rs` 的 `VALID_ACTIONS` 中添加动作名。
+2. 在 `src/harness/executor.rs` 的 `execute_step()` 中添加匹配分支。
+3. 在 `executor.rs` 中为该动作添加单元测试。
+4. 在 `docs/CONFIGURATION.md`（harness 部分）中记录该动作。
+5. 更新 `src/interface/mcp.rs` 中 `run_harness` 工具的 schema 描述。
+
 ## Documentation Contributions / 文档贡献
 
 Documentation is a first-class contribution. If you change behavior, update

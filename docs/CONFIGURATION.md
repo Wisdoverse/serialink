@@ -103,6 +103,133 @@ Pipeline steps are applied in order to serial data. Available types:
 | `http` | Enable HTTP server | `false` |
 | `port` | Listen port | 8600 |
 
+## Test Harness Configuration
+
+A test harness defines a multi-device test sequence in TOML. The harness
+runner opens ports, sends commands, checks responses, and reports per-step
+pass/fail -- all from a single config file.
+
+### `[harness]` -- Harness Metadata
+
+| Field | Description | Default |
+|-------|-------------|---------|
+| `name` | Harness name (required, max 64 chars) | -- |
+| `timeout` | Global timeout in seconds (max 300) | 60 |
+
+### `[[device]]` -- Device Definitions
+
+| Field | Description | Default |
+|-------|-------------|---------|
+| `name` | Device alias (required, max 64 chars, unique) | -- |
+| `port` | Serial port path (required) | -- |
+| `baud_rate` | Baud rate | 115200 |
+| `protocol` | Protocol preset (e.g. `modbus_rtu`) | -- |
+
+### `[[step]]` -- Test Steps
+
+| Field | Description | Default |
+|-------|-------------|---------|
+| `id` | Step identifier (required, max 64 chars, unique) | -- |
+| `device` | Device alias from `[[device]]` (required) | -- |
+| `action` | Action to execute (see table below) | -- |
+| `depends_on` | List of step IDs that must pass first | `[]` |
+| `params` | Action-specific parameters (inline table) | `{}` |
+| `on_fail` | Failure behavior | `"stop"` |
+
+### Valid Actions
+
+| Action | Params | Description |
+|--------|--------|-------------|
+| `open_port` | -- | Open the device's serial port |
+| `close_port` | -- | Close the device's serial port |
+| `send` | `data` | Write a string to the port |
+| `send_hex` | `hex` | Write hex-encoded bytes to the port |
+| `send_and_expect` | `data`, `expect`, `timeout` | Send data and wait for a regex match |
+| `expect` | `pattern`, `timeout` | Wait for a regex match on incoming data |
+| `delay` | `ms` | Wait a fixed number of milliseconds |
+| `read_lines` | `count` | Read the most recent N lines |
+
+### OnFail Variants
+
+| Value | Behavior |
+|-------|----------|
+| `"stop"` | Abort the harness immediately (default) |
+| `"continue"` | Mark step as failed but continue to the next step |
+| `"skip_dependents"` | Skip all steps that depend on this one |
+
+### Complete Example
+
+```toml
+[harness]
+name = "firmware-smoke"
+timeout = 60
+
+[[device]]
+name = "dut"
+port = "/dev/ttyUSB0"
+baud_rate = 115200
+
+[[device]]
+name = "programmer"
+port = "/dev/ttyUSB1"
+baud_rate = 9600
+
+[[step]]
+id = "open_dut"
+device = "dut"
+action = "open_port"
+
+[[step]]
+id = "open_prog"
+device = "programmer"
+action = "open_port"
+
+[[step]]
+id = "reset"
+device = "programmer"
+action = "send"
+depends_on = ["open_prog"]
+params = { data = "RST\r\n" }
+
+[[step]]
+id = "wait_boot"
+device = "dut"
+action = "expect"
+depends_on = ["open_dut", "reset"]
+params = { pattern = "ready", timeout = 10 }
+
+[[step]]
+id = "at_check"
+device = "dut"
+action = "send_and_expect"
+depends_on = ["wait_boot"]
+params = { data = "AT\r\n", expect = "OK", timeout = 5 }
+on_fail = "continue"
+
+[[step]]
+id = "close_dut"
+device = "dut"
+action = "close_port"
+depends_on = ["at_check"]
+
+[[step]]
+id = "close_prog"
+device = "programmer"
+action = "close_port"
+depends_on = ["reset"]
+```
+
+> **Note:** Use TOML inline tables for `params` (e.g. `params = { data = "AT\r\n" }`).
+> Multi-line standard tables are not supported for `params` inside `[[step]]`.
+
+### Security Limits
+
+- Max 16 devices per harness.
+- Max 256 steps per harness.
+- IDs (`name`, `id`, `device`) max 64 characters.
+- Global timeout max 300 seconds.
+- Port paths follow the same allowlist as the rest of serialink.
+
 ---
 
 ## 配置概览（中文）

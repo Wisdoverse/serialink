@@ -6,7 +6,7 @@ Structured serial port tool for automation, CI/CD, and AI agents. Rust CLI + MCP
 
 ```bash
 cargo build                              # Build
-cargo test                               # Test (114 tests: unit, HTTP API, pipeline integration)
+cargo test                               # Test (326 tests: unit, HTTP API, pipeline, harness)
 cargo fmt                                # Format
 cargo clippy -- -D warnings -A dead_code # Lint (allow dead_code: some pipeline helpers not yet called externally)
 cargo run -- list                        # List serial ports (JSON by default)
@@ -24,6 +24,8 @@ cargo run -- serve --http --config pipeline.toml   # HTTP with pipeline transfor
 cargo run -- --config modbus_rtu.toml monitor /dev/ttyS0        # Monitor with Modbus RTU decoding (JSON by default)
 cargo run -- send /dev/ttyS0 --hex "01 03 00 00 00 0A C5 CD"    # Send hex data
 cargo run -- serve --http --config modbus_rtu.toml               # HTTP with binary protocol
+cargo run -- --config harness.toml test              # Run test harness (JSON report)
+cargo run -- --human --config harness.toml test       # Human-readable test report
 ```
 
 ## Architecture
@@ -35,8 +37,8 @@ Three-layer design: `serial/` -> `pipeline/` -> `interface/`.
 - `src/serial/discovery.rs` — Port enumeration via serialport-rs.
 - `src/pipeline/` — Transform trait + engine. Wired into `reader_loop` via `--config` flag. Pipeline is optional (`Option<Arc<Pipeline>>`), stored in `SessionManager`, and applied to all sessions. `serial/port.rs` has an optional dependency on `pipeline/` for transform processing (pragmatic layer inversion). Pipeline filters apply globally — including to `send_and_expect`, which may time out if the expected pattern is on a filtered line.
 - `src/exit_codes.rs` — Semantic exit codes: SUCCESS(0), PATTERN_NOT_MATCHED(1), CONNECTION_ERROR(2), TIMEOUT(3), INVALID_INPUT(4), INTERNAL_ERROR(5).
-- `src/interface/cli.rs` — clap subcommands: list, monitor, send, serve. Agent-native: JSON output by default, `--human`/`--format text` for human-readable.
-- `src/interface/mcp.rs` — MCP Server (rmcp 0.1). 8 tools. Implements `ServerHandler` manually (not `#[tool]` macro). Supports stdio and SSE transports.
+- `src/interface/cli.rs` — clap subcommands: list, monitor, send, serve, test. Agent-native: JSON output by default, `--human`/`--format text` for human-readable.
+- `src/interface/mcp.rs` — MCP Server (rmcp 0.1). 10 tools. Implements `ServerHandler` manually (not `#[tool]` macro). Supports stdio and SSE transports.
 - `src/interface/http.rs` — HTTP REST API (axum 0.8). Mirrors MCP tools as REST endpoints. API key auth via `X-API-Key` header only (query param removed — leaks through logs/referers). CORS restricted to same-origin always (no permissive mode).
 - `src/config.rs` — TOML config structs. Re-exports `PipelineStepConfig` from `pipeline/engine.rs` (single source of truth — no duplicates).
 - `src/protocol/` — Binary protocol support. Frame parsing, checksum validation, Modbus decoders, output formatting.
@@ -48,6 +50,10 @@ Three-layer design: `serial/` -> `pipeline/` -> `interface/`.
   - `presets.rs` — Built-in protocol presets (modbus_rtu, modbus_ascii).
   - `format.rs` — Shared binary output formatting for all interfaces.
 - `src/serial/read_strategy.rs` — ReadStrategy trait + LineReadStrategy. Abstracts text vs binary reading in reader_loop.
+- `src/harness/` — Multi-device test harness with DAG-based orchestration.
+  - `schema.rs` — HarnessConfig, DeviceConfig, StepConfig, OnFail, HarnessReport, StepReport types. Serde for TOML (`[[device]]`/`[[step]]` array tables) and JSON (agent API).
+  - `dag.rs` — DAG construction from `depends_on` fields. Kahn's algorithm for cycle detection + topological sort. `parallel_groups()` returns step groups by depth for concurrent execution.
+  - `executor.rs` — `run_harness()` creates isolated SessionManager per run (no server cross-contamination). Executes DAG groups via `tokio::JoinSet`. 7 actions map 1:1 to serialink primitives: open_port, close_port, send_and_expect, write_data, read_lines (buffer-first then subscribe), snapshot, delay. `auto_reconnect=false` for deterministic testing. On-fail: Abort (cancel all), Continue (optimistic — dependents still run, auto-skip if device open failed), Ignore (omit from report).
 
 ## Gotchas
 
@@ -65,6 +71,12 @@ Three-layer design: `serial/` -> `pipeline/` -> `interface/`.
 - Modbus RTU gap detection is CRC-primary. OS UART buffering makes sub-ms gap detection unreliable. CRC-16 is the authoritative frame boundary. Gap detection uses conservative timeout (T_3.5 * 2, min 5ms).
 - `send_and_expect` in binary mode matches regex against `frame_summary` metadata, not base64 content. CLI `--filter` follows the same rule.
 - `ProtocolDecoder::decode` receives full frame including delimiters/CRC. Each decoder strips its own transport framing.
+- Harness `--config` reuses the global flag. TOML `[harness]`, `[[device]]`, `[[step]]` sections are ignored by non-test commands. Existing `[port]`/`[[pipeline]]`/`[protocol]` sections are ignored by `test`.
+- Harness creates its own `SessionManager` per run — never shares with the server's long-lived manager. `close_all()` only affects harness sessions.
+- Harness forces `auto_reconnect = false` on all devices. Do not change — deterministic test behavior requires fail-fast on disconnect.
+- `read_lines` in harness checks ring buffer first (catches data from predecessor steps), then subscribes for new lines. Order matters — subscribe-only misses data that arrived before the step started.
+- TOML `[[step]]` params must use inline tables (`params = { data = "...", expect = "..." }`), not `[step.params]` sub-tables — TOML array-of-tables ordering makes sub-tables unreliable.
+- `on_fail = "continue"` is optimistic: dependent steps still execute. Exception: if `open_port` failed and a dependent targets the same device, it's auto-skipped.
 
 ## When Adding MCP Tools
 
@@ -87,14 +99,14 @@ Every new MCP tool in `mcp.rs` must:
 - Serve flags: exactly one of `--mcp`, `--sse`, `--http` required (hard error if zero or multiple).
 - Hex input: max 6144 chars (CLI --hex, MCP send_data, HTTP send). Caps at ~3KB decoded bytes.
 - Frame size: max_frame_size default 1024, hard cap 65535. Prevents OOM from malformed length fields.
+- Harness: max 16 devices, 256 steps, 300s overall timeout, 30s per-step timeout. Step ID max 64 chars (alphanumeric + `_` + `-`). JSON payload max 64KB (HTTP). DAG cycle detection via Kahn's algorithm prevents infinite loops.
 
 ## Testing Strategy
 
-114 tests across 4 suites:
-- `src/` inline unit tests (34): pipeline transforms, engine, discovery.
-- `tests/http_api_test.rs` (27): HTTP API endpoints, auth, validation.
+326 tests across 5 suites:
+- `src/` inline unit tests (135 lib + 135 bin): pipeline transforms, engine, discovery, protocol, harness DAG/executor/schema, config.
+- `tests/http_api_test.rs` (37): HTTP API endpoints, auth, validation, harness endpoints.
 - `tests/pipeline_transforms.rs` (19): From conversions, TOML deserialization, regex security, transform ordering.
-- `src/protocol/` inline unit tests: checksum validation, frame parser, Modbus decoding, type serde, format helpers.
 - Next targets: integration tests with real serial ports via `socat -d -d pty,raw,echo=0 pty,raw,echo=0` for virtual port pairs.
 
 ## Code Style

@@ -13,14 +13,14 @@
 
 **What:** CLI + MCP server + HTTP API for serial port automation
 **When to use:** Reading/writing serial devices, hardware testing, Modbus monitoring, firmware validation
-**Interfaces:** CLI (`serialink`), MCP (9 tools over stdio/SSE), HTTP REST API
+**Interfaces:** CLI (`serialink`), MCP (10 tools over stdio/SSE), HTTP REST API
 **Input formats:** Text commands, hex binary (`--hex`), TOML config
 **Output formats:** JSON (structured lines with timestamps), base64 + structured frames (binary mode)
 **Session modes:** `text` (line-oriented, default) | `binary` (frame-oriented, Modbus/custom protocols)
 **Built-in protocols:** Modbus RTU, Modbus ASCII
 **Limits:** 16 concurrent sessions, 1000 lines/read, 30s max expect timeout, 1024-char regex, 65535-byte max frame
 
-### MCP Tools (9)
+### MCP Tools (10)
 | Tool | Purpose |
 |------|---------|
 | `list_ports` | Discover available serial ports |
@@ -32,6 +32,7 @@
 | `send_and_expect` | Write + regex wait (max 30s) |
 | `snapshot` | Dump buffer (max 5000 lines) |
 | `list_sessions` | List all active sessions |
+| `run_harness` | Execute a DAG-based test harness |
 
 ### CLI Quick Reference
 ```
@@ -39,6 +40,7 @@ serialink list [--human]
 serialink monitor <port> [-b baud] [--human] [-f regex]
 serialink send <port> <data> [-e pattern] [-t timeout] [--hex]
 serialink serve --mcp|--sse|--http [--bind addr] [--api-key key] [--config file.toml]
+serialink --config harness.toml test [--human]
 ```
 
 Exit codes: 0=matched, 1=not matched, 2=connection error, 3=timeout, 4=invalid input, 5=internal error
@@ -63,6 +65,12 @@ serialink serve --mcp
 
 # Start HTTP API with auth
 serialink serve --http --bind 0.0.0.0:8600 --api-key SECRET
+
+# Run test harness (JSON report)
+serialink --config examples/harness_smoke.toml test
+
+# Run test harness (human-readable report)
+serialink --human --config examples/harness_smoke.toml test
 ```
 
 </details>
@@ -72,7 +80,7 @@ serialink serve --http --bind 0.0.0.0:8600 --api-key SECRET
 
 **用途：** 面向 AI 代理、自动化和 CI/CD 的串口工具
 **何时使用：** 串口设备读写、硬件测试、Modbus 监控、固件验证
-**接口：** CLI (`serialink`)、MCP（9 个工具，stdio/SSE）、HTTP REST API
+**接口：** CLI (`serialink`)、MCP（10 个工具，stdio/SSE）、HTTP REST API
 **输入格式：** 文本命令、十六进制二进制（`--hex`）、TOML 配置
 **输出格式：** JSON（带时间戳的结构化行）、base64 + 结构化帧（二进制模式）
 **会话模式：** `text`（面向行，默认）| `binary`（面向帧，Modbus/自定义协议）
@@ -88,7 +96,7 @@ serialink serve --http --bind 0.0.0.0:8600 --api-key SECRET
 | Machine-readable output | Default JSON output |
 | Send-and-expect with regex | One command with semantic exit codes |
 | CI/CD exit codes | Semantic exit codes (0–5), always active |
-| AI agent integration | 9 MCP tools over stdio, plus HTTP REST API |
+| AI agent integration | 10 MCP tools over stdio, plus HTTP REST API |
 | Binary protocol support | Modbus RTU/ASCII presets, custom frame parsers, hex send |
 | Session management | Up to 16 concurrent sessions |
 | Port allowlist validation | Enforced on every open |
@@ -99,7 +107,7 @@ serialink serve --http --bind 0.0.0.0:8600 --api-key SECRET
 | 机器可读输出 | 默认 JSON 输出 |
 | 正则 send-and-expect | 一个命令即可完成，语义退出码始终生效 |
 | CI/CD 退出码 | 语义退出码（0–5），无需额外参数 |
-| AI 代理集成 | 通过 stdio 提供 9 个 MCP 工具，并提供 HTTP REST API |
+| AI 代理集成 | 通过 stdio 提供 10 个 MCP 工具，并提供 HTTP REST API |
 | 二进制协议支持 | Modbus RTU/ASCII 预设、自定义帧解析器、十六进制发送 |
 | 会话管理 | 最多 16 个并发会话 |
 | 端口白名单校验 | 每次打开端口时都会强制校验 |
@@ -197,23 +205,78 @@ when available.
 3. **Pipeline engine** -- configurable transform chain (timestamps, regex
    filter, log level parser, aggregator). Wired into the reader loop via
    `--config`.
-4. **Interface layer** -- CLI for agents and scripts, MCP for AI agents (9
+4. **Interface layer** -- CLI for agents and scripts, MCP for AI agents (10
    tools), HTTP REST API for remote access.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for implementation details.
+
+### Test Harness (Multi-Device Orchestration)
+
+DAG-based test harness for CI/CD hardware regression testing. Define devices,
+steps, dependencies, and failure policies in TOML -- serialink executes them
+with parallel scheduling and structured JSON reports.
+
+```toml
+# examples/harness_smoke.toml
+[harness]
+name = "smoke-test"
+timeout_seconds = 60
+
+[[device]]
+id = "dut"
+port = "/dev/ttyUSB0"
+baud_rate = 115200
+
+[[step]]
+id = "open"
+action = "open_port"
+device = "dut"
+
+[[step]]
+id = "ping"
+action = "send_and_expect"
+device = "dut"
+depends_on = ["open"]
+params = { data = "AT\r\n", expect = "OK", timeout_seconds = 5 }
+
+[[step]]
+id = "close"
+action = "close_port"
+device = "dut"
+depends_on = ["ping"]
+on_fail = "continue"
+```
+
+```bash
+# Run harness (JSON report by default)
+serialink --config examples/harness_smoke.toml test
+
+# Human-readable report
+serialink --human --config examples/harness_smoke.toml test
+```
+
+**Key features:**
+- DAG dependency ordering with parallel execution of independent steps
+- Configurable failure policies per step: `abort` (default), `continue`, `ignore`
+- 7 built-in step actions: `open_port`, `close_port`, `send_and_expect`,
+  `write_data`, `read_lines`, `snapshot`, `delay`
+- Isolated session manager per harness run (no cross-contamination with server sessions)
+- Also available via MCP (`run_harness` tool) and HTTP (`POST /api/harness/run`)
+
+See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the full harness config reference.
 
 ## Roadmap
 
 - [x] Core serial abstraction (discovery, connect, read/write, sessions)
 - [x] CLI (list, monitor, send) with default JSON output and semantic exit codes
-- [x] MCP server (9 tools over stdio transport)
+- [x] MCP server (10 tools over stdio transport)
 - [x] Wire pipeline engine into CLI and MCP
 - [x] HTTP REST API with API key authentication
 - [x] Web dashboard for monitoring
 - [x] MCP SSE remote transport
 - [x] Binary protocol support (Modbus, custom frame parsers)
-- [ ] Multi-device orchestration (test harness mode)
-- [ ] Pre-built binary releases
+- [x] Multi-device orchestration (test harness mode)
+- [x] Pre-built binary releases
 
 ## Contributing
 

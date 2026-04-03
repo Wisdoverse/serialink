@@ -98,6 +98,22 @@ is no command sanitization or allowlist for serial data. If you connect serialin
 to safety-critical hardware, ensure that the calling agent or user is authorized
 to send commands to that device.
 
+### Test Harness Constraints
+
+- **Max devices per harness:** 16
+- **Max steps per harness:** 256
+- **Step ID:** max 64 characters, alphanumeric + underscore + hyphen only
+- **Overall timeout:** max 300 seconds
+- **Per-step timeout:** max 30 seconds
+- **JSON payload size:** max 64 KB (HTTP `POST /api/harness/run` endpoint)
+- **Port path validation:** same allowlist as other interfaces (`/dev/tty*`,
+  `/dev/serial/*`, `/dev/cu.*`, `COMx`). Path traversal (`..`) rejected.
+- **Regex limits:** same as existing (1024 chars, 1 MB compiled size)
+- **Isolated SessionManager:** each harness run creates its own `SessionManager`
+  instance -- no cross-contamination with server sessions or other harness runs.
+- **DAG cycle detection:** dependency graph is validated before execution.
+  Cycles are rejected with a hard error, preventing infinite execution loops.
+
 ## Dependency Auditing
 
 We recommend running `cargo audit` regularly to check for known vulnerabilities

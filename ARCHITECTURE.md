@@ -467,6 +467,30 @@ The complete path of serial data through the system:
   processed DataChunks before delivery.
 ```
 
+**Harness path (test automation):**
+
+```
+  Interface (CLI test / MCP run_harness / HTTP POST /api/harness/run)
+      │
+      ▼
+  Harness Engine (dag.rs + executor.rs)
+      │ creates isolated
+      ▼
+  SessionManager (per-run, not shared with server sessions)
+      │
+      ▼
+  SerialConnection (existing, auto_reconnect=false)
+```
+
+The harness engine does not participate in the normal real-time data flow
+above. It creates its own isolated `SessionManager` and `SerialConnection`
+instances for the duration of a test run, then tears them down. This keeps
+harness runs from interfering with long-running server sessions.
+
+harness 引擎不参与上面的常规实时数据流。它会在测试运行期间创建自己隔离
+的 `SessionManager` 和 `SerialConnection` 实例，运行结束后全部销毁。这样
+可以避免 harness 运行与长期运行的服务会话互相干扰。
+
 The current data path is: hardware bytes enter the reader, are buffered,
 and are then fanned out to CLI, MCP, and HTTP consumers. The pipeline engine
 is still a future insertion point between the broadcast channel and those
@@ -841,3 +865,189 @@ several purposes:
   HTTP 接口天然保持无状态，并且读取操作天然幂等
 - **多租户安全**：UUID session ID 不易猜测，可避免多个代理共享同一个
   Serialink 实例时发生跨会话干扰
+
+## Test Harness Engine (`src/harness/`) / 测试 Harness 引擎（`src/harness/`）
+
+The harness engine provides structured, multi-step test automation for serial
+devices. It sits between the interface layer (CLI, MCP, HTTP) and the serial
+abstraction layer, orchestrating sequences of actions against one or more
+serial ports with dependency ordering, concurrency, and failure handling.
+
+harness 引擎为串口设备提供结构化的多步测试自动化能力。它位于接口层
+（CLI、MCP、HTTP）和串口抽象层之间，按照依赖顺序、并发度和失败策略来编
+排针对一个或多个串口的操作序列。
+
+### Architecture Overview / 架构概览
+
+The harness is an orchestration layer, not a new abstraction over serial
+ports. It reuses existing serialink primitives (`SessionManager`,
+`SerialConnection`, `send_and_expect`, `read_lines`) and composes them into
+directed acyclic graphs (DAGs) of test steps. Each harness run creates its
+own isolated `SessionManager` so that test execution never interferes with
+server sessions running in `serve` mode.
+
+```
+Interface (CLI test / MCP run_harness / HTTP POST /api/harness/run)
+    │
+    ▼
+Harness Engine (dag.rs + executor.rs)
+    │ creates isolated
+    ▼
+SessionManager (per-run, not shared)
+    │
+    ▼
+SerialConnection (existing, auto_reconnect=false)
+```
+
+harness 是编排层，而不是串口的新抽象。它复用已有的 serialink 原语
+（`SessionManager`、`SerialConnection`、`send_and_expect`、`read_lines`），
+把它们组合成有向无环图（DAG）形式的测试步骤。每次 harness 运行都会创建
+自己的隔离 `SessionManager`，测试执行不会干扰 `serve` 模式下正在运行的
+服务会话。
+
+### Module Breakdown / 模块结构
+
+#### `schema.rs` -- Types / 类型定义
+
+Defines the configuration and reporting types for harness runs:
+
+| Type              | Purpose                                                       |
+|-------------------|---------------------------------------------------------------|
+| `HarnessConfig`   | Top-level config: devices list + steps list                   |
+| `DeviceConfig`    | Per-device: port path, baud rate, alias for step references   |
+| `StepConfig`      | Single step: action, device ref, depends_on, on_fail policy   |
+| `OnFail`          | Failure policy enum: `Abort`, `Continue`, `Ignore`            |
+| `HarnessReport`   | Final report: per-step results, overall pass/fail, timing     |
+
+`HarnessConfig` is deserialized from TOML. Steps reference devices by alias,
+and declare dependencies on other steps by name.
+
+`HarnessConfig` 从 TOML 反序列化。步骤通过别名引用设备，并按名称声明对
+其他步骤的依赖。
+
+#### `dag.rs` -- DAG Construction and Scheduling / DAG 构建与调度
+
+Builds a directed acyclic graph from step dependencies and produces an
+execution schedule:
+
+1. **Graph construction** -- Each step becomes a node. `depends_on` entries
+   become directed edges. Missing dependency references are rejected at
+   build time.
+2. **Cycle detection** -- Uses Kahn's algorithm (BFS topological sort). If
+   the algorithm cannot visit all nodes, a cycle exists and the harness
+   refuses to run, returning an error that names the involved steps.
+3. **Topological sort** -- Produces a total ordering that respects all
+   dependency edges.
+4. **Parallel group extraction** -- Steps are grouped by topological depth
+   (distance from root nodes). Steps at the same depth have no mutual
+   dependencies and can execute concurrently.
+
+从步骤依赖关系构建有向无环图，并生成执行调度：
+
+1. **图构建** -- 每个步骤成为一个节点，`depends_on` 条目变成有向边。构建
+   时会拒绝引用不存在的依赖。
+2. **环检测** -- 使用 Kahn 算法（BFS 拓扑排序）。如果算法无法访问所有节
+   点，说明存在环，harness 拒绝运行并返回涉及的步骤名称。
+3. **拓扑排序** -- 生成遵守所有依赖边的全序。
+4. **并行组提取** -- 按拓扑深度分组。同一深度的步骤之间没有相互依赖，可
+   以并发执行。
+
+#### `executor.rs` -- Action Dispatch and Execution / 动作分派与执行
+
+Executes the DAG schedule against real serial ports:
+
+- **Action dispatch** -- Maps each step's action to an existing serialink
+  primitive. The 7 supported actions are:
+
+  | Action             | Maps to                                      |
+  |--------------------|----------------------------------------------|
+  | `open`             | `SessionManager::create_session`             |
+  | `close`            | `SessionManager::close_session`              |
+  | `send`             | `SerialConnection::write_data`               |
+  | `send_and_expect`  | `SerialConnection::send_and_expect`          |
+  | `read_lines`       | `SerialConnection::read_lines` (ring buffer) |
+  | `delay`            | `tokio::time::sleep`                         |
+  | `assert_contains`  | Regex match against collected output          |
+
+- **Group execution** -- Groups are executed sequentially (depth 0, then
+  depth 1, etc.). Within each group, all steps are spawned concurrently
+  using `tokio::task::JoinSet`. The executor waits for all tasks in the
+  current group to complete before starting the next group.
+- **on_fail semantics** -- When a step fails:
+  - `Abort` -- Cancel all remaining steps in the current group (via
+    `JoinSet::abort_all`) and skip all subsequent groups. The harness
+    reports the failure and stops.
+  - `Continue` -- Log the failure but proceed with remaining steps.
+    Dependents of the failed step still run (optimistic execution).
+  - `Ignore` -- Treat the step as passed regardless of outcome. Dependents
+    proceed normally.
+
+执行 DAG 调度：
+
+- **动作分派** -- 每个步骤的 action 映射到已有的 serialink 原语，共 7 种。
+- **按组执行** -- 组按深度顺序依次执行。同组内的步骤通过
+  `tokio::task::JoinSet` 并发运行。当前组全部完成后才开始下一组。
+- **on_fail 语义** -- 步骤失败时：
+  - `Abort` -- 取消当前组内所有剩余步骤并跳过后续组
+  - `Continue` -- 记录失败，继续执行；依赖它的步骤仍然会运行
+  - `Ignore` -- 无论结果如何都视为通过
+
+### DAG Execution Model / DAG 执行模型
+
+```
+Steps:  A ──► C ──► E
+        B ──► D ──►─┘
+
+Depth:  0     1     2
+
+Group 0: [A, B]  -- run concurrently
+Group 1: [C, D]  -- run concurrently (after group 0 completes)
+Group 2: [E]     -- run alone (after group 1 completes)
+```
+
+Groups execute **sequentially**, steps within a group execute
+**concurrently**. This maximizes parallelism while respecting dependency
+constraints. A step only appears in a group after all of its dependencies
+have been placed in earlier groups.
+
+组之间**顺序执行**，组内步骤**并发执行**。这样可以在尊重依赖约束的前提
+下最大化并行度。一个步骤只有在其所有依赖都已放入更早的组之后，才会被分
+配到当前组。
+
+### Key Design Decisions / 关键设计决策
+
+- **Isolated SessionManager per harness run.** The executor creates a fresh
+  `SessionManager` that is not shared with the server's session pool. This
+  prevents harness test steps from consuming session slots, colliding with
+  active monitoring sessions, or leaving stale sessions after a test run.
+  The isolated manager is dropped (and all its sessions closed) when the
+  harness run completes.
+
+- **auto_reconnect=false for deterministic testing.** Connections opened by
+  the harness disable auto-reconnect. If a device disappears mid-test, the
+  step fails immediately rather than silently retrying. This makes test
+  results deterministic and avoids masking real hardware failures.
+
+- **Buffer-first read_lines.** When a step reads lines, the executor first
+  drains the ring buffer (historical data), then subscribes to the broadcast
+  channel for new data if more lines are needed. This ensures that data
+  produced by a previous step (e.g., a `send` in the same group) is
+  captured even if it arrived before the `read_lines` step started
+  executing.
+
+- **Steps map 1:1 to existing serialink primitives.** The harness does not
+  introduce new serial I/O abstractions. Every action delegates directly to
+  an existing `SerialConnection` or `SessionManager` method. This keeps the
+  harness thin and ensures that test behavior matches production behavior
+  exactly.
+
+- **每次 harness 运行使用隔离的 SessionManager。** 执行器会创建一个新的
+  `SessionManager`，不与服务器的会话池共享。这样可以避免测试步骤占用会话
+  名额、与活跃监控会话冲突，或在测试结束后留下残留会话。
+- **auto_reconnect=false 保证测试确定性。** harness 打开的连接会禁用自动
+  重连。如果设备在测试中途断开，步骤会立即失败而不是静默重试。
+- **缓冲区优先的 read_lines。** 读取行时，执行器先从环形缓冲区取历史数
+  据，如果还需要更多行再订阅广播通道。这样可以确保前一步骤产出的数据不
+  会丢失。
+- **步骤与 serialink 原语一一对应。** harness 不引入新的串口 I/O 抽象，
+  每个动作都直接委托给已有的方法，确保测试行为与生产行为完全一致。

@@ -202,6 +202,42 @@ impl SerialinkMcpServer {
                     "required": []
                 })),
             ),
+            Tool::new(
+                "run_harness",
+                "Run a multi-device test harness. Accepts a complete harness configuration with devices and DAG-ordered steps.",
+                rmcp::model::object(json!({
+                    "type": "object",
+                    "properties": {
+                        "config": {
+                            "type": "object",
+                            "description": "Complete harness configuration with harness metadata, devices, and steps",
+                            "properties": {
+                                "harness": {
+                                    "type": "object",
+                                    "description": "Harness metadata (name, timeout)",
+                                    "properties": {
+                                        "name": { "type": "string" },
+                                        "timeout": { "type": "integer" }
+                                    },
+                                    "required": ["name"]
+                                },
+                                "device": {
+                                    "type": "array",
+                                    "description": "Device definitions (name, port, baud_rate, protocol)",
+                                    "items": { "type": "object" }
+                                },
+                                "step": {
+                                    "type": "array",
+                                    "description": "DAG-ordered step definitions (id, device, action, params, depends_on, on_fail)",
+                                    "items": { "type": "object" }
+                                }
+                            },
+                            "required": ["harness"]
+                        }
+                    },
+                    "required": ["config"]
+                })),
+            ),
         ]
     }
 
@@ -220,6 +256,7 @@ impl SerialinkMcpServer {
             "send_and_expect" => self.handle_send_and_expect(args).await,
             "snapshot" => self.handle_snapshot(args).await,
             "list_sessions" => self.handle_list_sessions().await,
+            "run_harness" => self.handle_run_harness(args).await,
             _ => Err(McpError::method_not_found::<
                 rmcp::model::CallToolRequestMethod,
             >()),
@@ -634,6 +671,71 @@ impl SerialinkMcpServer {
         .map_err(|e| {
             McpError::internal_error(
                 "Failed to serialize snapshot",
+                Some(json!({ "reason": e.to_string() })),
+            )
+        })?;
+
+        Ok(CallToolResult::success(vec![Content::text(json_str)]))
+    }
+
+    async fn handle_run_harness(
+        &self,
+        args: &serde_json::Map<String, serde_json::Value>,
+    ) -> Result<CallToolResult, McpError> {
+        let config_val = args
+            .get("config")
+            .ok_or_else(|| McpError::invalid_params("missing required parameter: config", None))?;
+
+        let config: crate::harness::schema::HarnessConfig =
+            serde_json::from_value(config_val.clone()).map_err(|e| {
+                McpError::invalid_params(
+                    "Invalid harness config",
+                    Some(json!({ "reason": e.to_string() })),
+                )
+            })?;
+
+        // Validate harness name
+        if config.harness.name.is_empty() || config.harness.name.len() > 128 {
+            return Err(McpError::invalid_params(
+                "harness.name must be 1-128 characters",
+                None,
+            ));
+        }
+
+        if config.devices.is_empty() {
+            return Err(McpError::invalid_params(
+                "harness has no devices defined",
+                None,
+            ));
+        }
+        if config.steps.is_empty() {
+            return Err(McpError::invalid_params(
+                "harness has no steps defined",
+                None,
+            ));
+        }
+        if config.devices.len() > 16 {
+            return Err(McpError::invalid_params("Too many devices (max 16)", None));
+        }
+        if config.steps.len() > 256 {
+            return Err(McpError::invalid_params("Too many steps (max 256)", None));
+        }
+
+        // Validate device names
+        for dev in &config.devices {
+            if dev.name.is_empty() || dev.name.len() > 64 {
+                return Err(McpError::invalid_params(
+                    "device name must be 1-64 characters",
+                    None,
+                ));
+            }
+        }
+
+        let report = crate::harness::executor::run_harness(&config).await;
+
+        let json_str = serde_json::to_string(&report).map_err(|e| {
+            McpError::internal_error(
+                "Failed to serialize harness report",
                 Some(json!({ "reason": e.to_string() })),
             )
         })?;

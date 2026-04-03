@@ -411,6 +411,63 @@ async fn close_port(
     Ok(Json(json!({"status": "closed", "session_id": id})))
 }
 
+async fn harness_run(
+    State(_state): State<AppState>,
+    Json(config): Json<crate::harness::schema::HarnessConfig>,
+) -> Response {
+    // Validate harness name
+    if config.harness.name.is_empty() || config.harness.name.len() > 128 {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({"error": "harness.name must be 1-128 characters"})),
+        )
+            .into_response();
+    }
+
+    if config.devices.is_empty() {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({"error": "harness has no devices defined"})),
+        )
+            .into_response();
+    }
+    if config.steps.is_empty() {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({"error": "harness has no steps defined"})),
+        )
+            .into_response();
+    }
+    if config.devices.len() > 16 {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({"error": "Too many devices (max 16)"})),
+        )
+            .into_response();
+    }
+    if config.steps.len() > 256 {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({"error": "Too many steps (max 256)"})),
+        )
+            .into_response();
+    }
+
+    // Validate device names
+    for dev in &config.devices {
+        if dev.name.is_empty() || dev.name.len() > 64 {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(json!({"error": "device name must be 1-64 characters"})),
+            )
+                .into_response();
+        }
+    }
+
+    let report = crate::harness::executor::run_harness(&config).await;
+    Json(report).into_response()
+}
+
 // --- Router builder (public for integration tests) ---
 
 /// Build the axum [`Router`] with all routes, middleware, and state.
@@ -458,6 +515,7 @@ pub fn build_router(
         .route("/api/sessions/{id}/send-and-expect", post(send_and_expect))
         .route("/api/sessions/{id}/snapshot", get(snapshot))
         .route("/api/sessions/{id}", delete(close_port))
+        .route("/api/harness/run", post(harness_run))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth_middleware,
